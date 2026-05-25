@@ -75,4 +75,89 @@ public class HomeAssistantClientTests
 
         Assert.IsType<HaResult.DeviceNotFound>(result);
     }
+
+    // -----------------------------------------------------------------------
+    // #1b — Known device resolves entity_id from device map
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task TurnOnAsync_KnownDevice_PassesEntityIdToGateway()
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        var sut = CreateSut(fake);
+
+        await sut.TurnOnAsync("Banan");
+
+        var turnOnCall = fake.Calls.FirstOrDefault(c => c.ToolName == "HassTurnOn");
+        Assert.NotNull(turnOnCall.ToolName);
+        Assert.Equal("light.banan", turnOnCall.Args["name"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // #2 — TurnOnAsync → calls HassTurnOn, returns Ok
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task TurnOnAsync_KnownDevice_ReturnsOk()
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        var sut = CreateSut(fake);
+
+        var result = await sut.TurnOnAsync("Banan");
+
+        Assert.IsType<HaResult.Ok>(result);
+    }
+
+    [Fact]
+    public async Task TurnOnAsync_KnownDevice_CallsHassTurnOnTool()
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        var sut = CreateSut(fake);
+
+        await sut.TurnOnAsync("Banan");
+
+        Assert.Contains(fake.Calls, c => c.ToolName == "HassTurnOn");
+    }
+
+    // -----------------------------------------------------------------------
+    // #3 — TurnOffAsync → calls HassTurnOff, returns Ok
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task TurnOffAsync_UnknownDevice_ReturnsDeviceNotFound()
+    {
+        var fake = new FakeMcpGateway();
+        var sut = CreateSut(fake);
+
+        var result = await sut.TurnOffAsync("Lampa som inte finns");
+
+        Assert.IsType<HaResult.DeviceNotFound>(result);
+    }
+
+    [Fact]
+    public async Task TurnOffAsync_KnownDevice_ReturnsOk()
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        var sut = CreateSut(fake);
+
+        var result = await sut.TurnOffAsync("Banan");
+
+        Assert.IsType<HaResult.Ok>(result);
+    }
+
+    [Fact]
+    public async Task TurnOffAsync_KnownDevice_CallsHassTurnOffTool()
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        var sut = CreateSut(fake);
+
+        await sut.TurnOffAsync("Banan");
+
+        Assert.Contains(fake.Calls, c => c.ToolName == "HassTurnOff");
+    }
 }
