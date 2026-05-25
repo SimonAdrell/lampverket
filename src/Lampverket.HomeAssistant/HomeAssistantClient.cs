@@ -50,14 +50,34 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
             entry, ct);
     }
 
-    public Task<HaResult> SetBrightnessAsync(string device, int percent, CancellationToken ct = default) =>
-        throw new NotImplementedException();
+    public Task<HaResult> SetBrightnessAsync(string device, int percent, CancellationToken ct = default)
+    {
+        var entry = FindDevice(device);
+        if (entry is null) return Task.FromResult<HaResult>(new HaResult.DeviceNotFound(device));
+        var clamped = Math.Clamp(percent, 0, 100);
+        return CallActionAsync(_options.Tools.LightSet,
+            new Dictionary<string, object?> { ["name"] = entry.EntityId, ["brightness"] = clamped },
+            entry, ct);
+    }
 
-    public Task<HaResult> SetVolumeAsync(string device, int percent, CancellationToken ct = default) =>
-        throw new NotImplementedException();
+    public Task<HaResult> SetVolumeAsync(string device, int percent, CancellationToken ct = default)
+    {
+        var entry = FindDevice(device);
+        if (entry is null) return Task.FromResult<HaResult>(new HaResult.DeviceNotFound(device));
+        var clamped = Math.Clamp(percent, 0, 100);
+        return CallActionAsync(_options.Tools.SetVolume,
+            new Dictionary<string, object?> { ["name"] = entry.EntityId, ["volume_level"] = clamped },
+            entry, ct);
+    }
 
-    public Task<HaResult> PlayMediaAsync(string device, string query, CancellationToken ct = default) =>
-        throw new NotImplementedException();
+    public Task<HaResult> PlayMediaAsync(string device, string query, CancellationToken ct = default)
+    {
+        var entry = FindDevice(device);
+        if (entry is null) return Task.FromResult<HaResult>(new HaResult.DeviceNotFound(device));
+        return CallActionAsync(_options.Tools.MediaSearchAndPlay,
+            new Dictionary<string, object?> { ["name"] = entry.EntityId, ["search_query"] = query },
+            entry, ct);
+    }
 
     public Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken ct = default) =>
         throw new NotImplementedException();

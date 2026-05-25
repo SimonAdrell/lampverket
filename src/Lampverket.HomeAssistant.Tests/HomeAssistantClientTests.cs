@@ -160,4 +160,133 @@ public class HomeAssistantClientTests
 
         Assert.Contains(fake.Calls, c => c.ToolName == "HassTurnOff");
     }
+
+    // -----------------------------------------------------------------------
+    // #4a — SetBrightnessAsync passes percent as brightness arg (0-100 int)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task SetBrightnessAsync_CallsHassLightSetWithBrightnessPercent()
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        var sut = CreateSut(fake);
+
+        await sut.SetBrightnessAsync("Banan", 60);
+
+        var call = fake.Calls.FirstOrDefault(c => c.ToolName == "HassLightSet");
+        Assert.NotNull(call.ToolName);
+        Assert.Equal(60, call.Args["brightness"]);
+    }
+
+    [Fact]
+    public async Task SetBrightnessAsync_KnownDevice_ReturnsOk()
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        var sut = CreateSut(fake);
+
+        var result = await sut.SetBrightnessAsync("Banan", 60);
+
+        Assert.IsType<HaResult.Ok>(result);
+    }
+
+    // #4b — Clamping: < 0 → 0, > 100 → 100
+    [Theory]
+    [InlineData(-5, 0)]
+    [InlineData(150, 100)]
+    [InlineData(0, 0)]
+    [InlineData(100, 100)]
+    public async Task SetBrightnessAsync_ClampsPercentTo0to100(int input, int expected)
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        var sut = CreateSut(fake);
+
+        await sut.SetBrightnessAsync("Banan", input);
+
+        var call = fake.Calls.FirstOrDefault(c => c.ToolName == "HassLightSet");
+        Assert.NotNull(call.ToolName);
+        Assert.Equal(expected, call.Args["brightness"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // #5a — SetVolumeAsync passes percent as volume_level arg (0-100 int)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task SetVolumeAsync_CallsHassSetVolumeWithVolumeLevel()
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        var sut = CreateSut(fake, TestOptions(
+        [
+            new() { Friendly = "Banan", EntityId = "media_player.banan", Area = "Bedroom", Actions = ["volume"] }
+        ]));
+
+        await sut.SetVolumeAsync("Banan", 40);
+
+        var call = fake.Calls.FirstOrDefault(c => c.ToolName == "HassSetVolume");
+        Assert.NotNull(call.ToolName);
+        Assert.Equal(40, call.Args["volume_level"]);
+    }
+
+    [Fact]
+    public async Task SetVolumeAsync_KnownDevice_ReturnsOk()
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        var sut = CreateSut(fake);
+
+        var result = await sut.SetVolumeAsync("Banan", 40);
+
+        Assert.IsType<HaResult.Ok>(result);
+    }
+
+    // #5b — Clamping: < 0 → 0, > 100 → 100
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(101, 100)]
+    public async Task SetVolumeAsync_ClampsPercentTo0to100(int input, int expected)
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        var sut = CreateSut(fake);
+
+        await sut.SetVolumeAsync("Banan", input);
+
+        var call = fake.Calls.FirstOrDefault(c => c.ToolName == "HassSetVolume");
+        Assert.NotNull(call.ToolName);
+        Assert.Equal(expected, call.Args["volume_level"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // #6 — PlayMediaAsync passes search_query (not "query")
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task PlayMediaAsync_PassesSearchQueryArg()
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        var sut = CreateSut(fake);
+
+        await sut.PlayMediaAsync("Banan", "jazz");
+
+        var call = fake.Calls.FirstOrDefault(c => c.ToolName == "HassMediaSearchAndPlay");
+        Assert.NotNull(call.ToolName);
+        Assert.Equal("jazz", call.Args["search_query"]);
+    }
+
+    [Fact]
+    public async Task PlayMediaAsync_KnownDevice_ReturnsOk()
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        var sut = CreateSut(fake);
+
+        var result = await sut.PlayMediaAsync("Banan", "jazz");
+
+        Assert.IsType<HaResult.Ok>(result);
+    }
 }
