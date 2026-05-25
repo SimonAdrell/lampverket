@@ -4,5 +4,8 @@
     <Project Path="src/Lampverket.AppHost/Lampverket.AppHost.csproj" />
     <Project Path="src/Lampverket.ServiceDefaults/Lampverket.ServiceDefaults.csproj" />
     <Project Path="src/Lampverket.Web/Lampverket.Web.csproj" />
+    <Project Path="src/Lampverket.HomeAssistant/Lampverket.HomeAssistant.csproj" />
+    <Project Path="src/Lampverket.HomeAssistant.Tests/Lampverket.HomeAssistant.Tests.csproj" />
+    <Project Path="src/Lampverket.HomeAssistant.TryIt/Lampverket.HomeAssistant.TryIt.csproj" />
   </Folder>
 </Solution>
