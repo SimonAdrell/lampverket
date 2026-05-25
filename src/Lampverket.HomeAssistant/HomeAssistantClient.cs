@@ -80,7 +80,7 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
     }
 
     public Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken ct = default) =>
-        throw new NotImplementedException();
+        _gateway.ListToolsAsync(ct);
 
     // -----------------------------------------------------------------------
     // Internals

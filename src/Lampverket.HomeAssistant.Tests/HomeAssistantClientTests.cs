@@ -289,4 +289,111 @@ public class HomeAssistantClientTests
 
         Assert.IsType<HaResult.Ok>(result);
     }
+
+    // -----------------------------------------------------------------------
+    // #7 — GetStateAsync parses on-state fixture correctly
+    // brightness '153' → round(153/255*100) = 60
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetStateAsync_OnFixture_ParsesStateCorrectly()
+    {
+        var fake = new FakeMcpGateway();
+        fake.Returns("GetLiveContext", new McpCallResult(false, OnFixture));
+        var sut = CreateSut(fake);
+
+        var state = await sut.GetStateAsync("Banan");
+
+        Assert.Equal("Banan", state.FriendlyName);
+        Assert.Equal("light.banan", state.EntityId);
+        Assert.True(state.IsOn);
+        Assert.Equal(60, state.BrightnessPercent);
+        Assert.True(state.IsAvailable);
+    }
+
+    // -----------------------------------------------------------------------
+    // #7b — GetStateAsync parses off-state fixture: IsOn=false, brightness null
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetStateAsync_OffFixture_ParsesStateCorrectly()
+    {
+        var fake = new FakeMcpGateway();
+        fake.Returns("GetLiveContext", new McpCallResult(false, OffFixture));
+        var sut = CreateSut(fake);
+
+        var state = await sut.GetStateAsync("Banan");
+
+        Assert.False(state.IsOn);
+        Assert.Null(state.BrightnessPercent);
+        Assert.True(state.IsAvailable);
+    }
+
+    // -----------------------------------------------------------------------
+    // #8 — Unavailable device: TurnOnAsync returns DeviceUnavailable
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task TurnOnAsync_UnavailableDevice_ReturnsDeviceUnavailable()
+    {
+        var fake = new FakeMcpGateway();
+        fake.Returns("GetLiveContext", new McpCallResult(false, UnavailableFixture));
+        var sut = CreateSut(fake);
+
+        var result = await sut.TurnOnAsync("Banan");
+
+        var unavailable = Assert.IsType<HaResult.DeviceUnavailable>(result);
+        Assert.Equal("Banan", unavailable.Name);
+    }
+
+    [Fact]
+    public async Task GetStateAsync_UnavailableFixture_IsAvailableFalse()
+    {
+        var fake = new FakeMcpGateway();
+        fake.Returns("GetLiveContext", new McpCallResult(false, UnavailableFixture));
+        var sut = CreateSut(fake);
+
+        var state = await sut.GetStateAsync("Banan");
+
+        Assert.False(state.IsAvailable);
+        Assert.False(state.IsOn);
+    }
+
+    // -----------------------------------------------------------------------
+    // #9 — Tool error → HaResult.ToolError(message)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task TurnOnAsync_ToolError_ReturnsToolError()
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        fake.Returns("HassTurnOn", new McpCallResult(true, "Entity not found"));
+        var sut = CreateSut(fake);
+
+        var result = await sut.TurnOnAsync("Banan");
+
+        var error = Assert.IsType<HaResult.ToolError>(result);
+        Assert.Equal("Entity not found", error.Message);
+    }
+
+    // -----------------------------------------------------------------------
+    // #10 — ListToolsAsync delegates to gateway
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task ListToolsAsync_ReturnsMcpGatewayTools()
+    {
+        var fake = new FakeMcpGateway
+        {
+            ToolList = [new McpToolInfo("HassTurnOn", "Turns on a device"), new McpToolInfo("GetLiveContext", null)]
+        };
+        var sut = CreateSut(fake);
+
+        var tools = await sut.ListToolsAsync();
+
+        Assert.Equal(2, tools.Count);
+        Assert.Contains(tools, t => t.Name == "HassTurnOn");
+        Assert.Contains(tools, t => t.Name == "GetLiveContext");
+    }
 }
