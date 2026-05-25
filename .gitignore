@@ -38,6 +38,9 @@ ScaffoldingReadMe.txt
 
 # dotenv environment variables file
 .env
+.env.*
+*.token
+secrets.*
 
 # Others
 ~$*
@@ -55,3 +58,34 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+
+# Local config with real entity IDs / secrets (keep an *.Example.json committed)
+appsettings.Local.json
+appsettings.*.Local.json
+config.local.*
+devices.local.*
+
+# .NET build artifacts
+bin/
+obj/
+*.user
+*.suo
+.vs/
+artifacts/
+[Dd]ebug/
+[Rr]elease/
+TestResults/
+
+# Diariet (runtime audit log — optional: keep a sample, ignore live)
+arendelogg.local.*
+diariet/*.local.*
+*.db
+*.db-shm
+*.db-wal
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

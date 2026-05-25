@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Lampverket.ApiService/Lampverket.ApiService.csproj" />
+    <Project Path="src/Lampverket.AppHost/Lampverket.AppHost.csproj" />
+    <Project Path="src/Lampverket.ServiceDefaults/Lampverket.ServiceDefaults.csproj" />
+    <Project Path="src/Lampverket.Web/Lampverket.Web.csproj" />
+  </Folder>
+</Solution>
