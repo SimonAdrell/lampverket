@@ -16,7 +16,8 @@ Concept and docs complete, implementation pending. See `docs/ROADMAP.md` for the
 
 All-.NET, to showcase agentic AI in C#:
 
-- **Runtime:** .NET 8/9, C#
+- **Runtime:** .NET 10, C#
+- **Orchestration:** **.NET Aspire** (AppHost, ServiceDefaults, ApiService) — service composition and dev-time orchestration.
 - **Front end:** **Blazor Web App** (interactive Server render mode) — the e-tjänst portal. SignalR pushes the *beslut* to the page live. See `docs/WEBAPP.md`.
 - **Agent:** a C# *handläggare* service calling Claude via the **`Anthropic.SDK`** NuGet (there is no Anthropic-authored .NET SDK; this community SDK, or raw HTTP, is the standard route). Uses Claude tool-use for a structured `beslut`.
 - **Device control:** Home Assistant via the official **C# MCP SDK** (`ModelContextProtocol`). `Lampverket.HomeAssistant` is an MCP *client* that connects to Home Assistant's built-in **MCP Server** and calls its Assist tools (`GetLiveContext`, `HassTurnOn`, `HassTurnOff`, `HassLightSet`, `HassSetVolume`, `HassMediaSearchAndPlay`). See `docs/DEVICES.md`.
@@ -30,7 +31,7 @@ lampverket/
 ├── CLAUDE.md                     # this file
 ├── .gitignore
 ├── README.md                     # (to add) public-facing intro
-├── Lampverket.sln                # (to add)
+├── Lampverket.slnx               # solution file
 ├── docs/
 │   ├── CONTEXT.md
 │   ├── ARCHITECTURE.md
@@ -38,11 +39,16 @@ lampverket/
 │   ├── DEVICES.md
 │   ├── WEBAPP.md                 # the Blazor e-tjänst spec + design system
 │   └── ROADMAP.md
-└── src/                          # (to add)
-    ├── Lampverket.Web/           # Blazor e-tjänst portal
-    ├── Lampverket.Core/          # domain: Ansokan, Arende, Beslut, Enhet, codex, state machine, diariet
-    ├── Lampverket.Agent/         # handläggaragent: Anthropic.SDK + Claude tool-use
-    └── Lampverket.HomeAssistant/ # MCP client to Home Assistant's MCP Server (C# MCP SDK)
+└── src/
+    ├── Lampverket.AppHost/       # .NET Aspire AppHost — service orchestration (built)
+    ├── Lampverket.ServiceDefaults/ # .NET Aspire shared defaults (built)
+    ├── Lampverket.ApiService/    # Aspire API service (built, default template)
+    ├── Lampverket.Web/           # Blazor e-tjänst portal (scaffolded, not yet themed)
+    ├── Lampverket.HomeAssistant/ # MCP client to Home Assistant's MCP Server (built)
+    ├── Lampverket.HomeAssistant.Tests/ # unit tests for HomeAssistant (built)
+    ├── Lampverket.HomeAssistant.TryIt/ # manual test harness for HomeAssistant (built)
+    ├── Lampverket.Core/          # domain: Ansokan, Arende, Beslut, Enhet, codex, state machine, diariet (not yet created)
+    └── Lampverket.Agent/         # handläggaragent: Anthropic.SDK + Claude tool-use (not yet created)
 ```
 
 ## Conventions and rules

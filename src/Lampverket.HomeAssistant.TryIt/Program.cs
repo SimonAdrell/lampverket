@@ -67,6 +67,7 @@ if (opts.Devices.Length > 0)
     Console.WriteLine($"\n> HassTurnOff with name: \"{device.Friendly}\" (friendly name — turning off again)");
     var r2 = await gateway.CallToolAsync("HassTurnOff",
         new Dictionary<string, object?> { ["name"] = device.Friendly });
+
     Console.WriteLine($"  IsError={r2.IsError}  Content={r2.Content}");
 
     Console.WriteLine($"\n> HassTurnOn with name: \"{device.EntityId}\" (entity_id)");
