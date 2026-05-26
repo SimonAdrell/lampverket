@@ -4,19 +4,20 @@ namespace Lampverket.Web;
 
 // Placeholder until Lampverket.Agent is wired in.
 // Returns a "bordläggs" decision so the UI flow can be exercised end-to-end.
-internal sealed class PlaceholderHandlaggareService : IHandlaggareService
+internal sealed class PlaceholderHandlaggareService(TimeProvider clock) : IHandlaggareService
 {
     private static int _counter;
 
     public Task<Arende> RegisterAnsokanAsync(Ansokan ansokan)
     {
         var nr = Interlocked.Increment(ref _counter);
-        var diarienummer = $"LV-{DateTime.Now.Year}-{nr:D6}";
+        var now = clock.GetUtcNow();
+        var diarienummer = $"LV-{now.Year}-{nr:D6}";
 
         var arende = new Arende
         {
             Diarienummer = diarienummer,
-            Mottaget = DateTimeOffset.Now,
+            Mottaget = now,
             Ansokan = ansokan,
             Status = Arendestatus.Beslutat,
             Beslut = new Beslut
@@ -27,7 +28,7 @@ internal sealed class PlaceholderHandlaggareService : IHandlaggareService
                 Lagrum = [],
                 Overklagandehanvisning = "Detta beslut kan ej överklagas.",
                 Verkstallighet = "Ingen åtgärd vidtagen.",
-                Datum = DateTimeOffset.Now
+                Datum = now
             }
         };
         return Task.FromResult(arende);

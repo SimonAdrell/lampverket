@@ -2,7 +2,10 @@
 @inject TimeProvider Clock
 
 @{
-    var now = Clock.GetLocalNow();
+    // Evaluate fika window in Swedish local time regardless of server TZ.
+    // .NET 6+ supports IANA IDs on all platforms (ICU / tzdata).
+    var _stockholmTz = TimeZoneInfo.FindSystemTimeZoneById("Europe/Stockholm");
+    var now = TimeZoneInfo.ConvertTime(Clock.GetUtcNow(), _stockholmTz);
     var isFika = now.DayOfWeek == DayOfWeek.Friday && now.Hour == 14;
 }
 

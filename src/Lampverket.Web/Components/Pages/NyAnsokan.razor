@@ -7,11 +7,19 @@
 
 <h1>Ny ansökan</h1>
 
+@if (Session.Namn is null)
+{
+    <p class="driftinfo-banner">
+        Du är inte inloggad via BankID.
+        Lampverket accepterar ansökningar från ej autentiserade medborgare
+        i enlighet med offentlighetsprincipen — personnummer används som identifierare.
+    </p>
+}
+
 <form @onsubmit="Submit" @onsubmit:preventDefault="true">
     <div>
         <label for="personnummer">Personnummer (obligatoriskt)</label>
-        <input id="personnummer" type="text" placeholder="ÅÅÅÅMMDD-XXXX"
-               @bind="_personnummer" />
+        <input id="personnummer" type="text" placeholder="ÅÅÅÅMMDD-XXXX" @bind="_personnummer" />
         @if (_personnummerError is not null)
         {
             <span class="field-error">@_personnummerError</span>
@@ -43,17 +51,19 @@
     {
         <div>
             <label for="onskad-atgard-range">Önskad nivå (0–100 %)</label>
-            <input id="onskad-atgard-range" type="range" min="0" max="100"
-                   @bind="_onskadAtgard" />
+            <input id="onskad-atgard-range" type="range" min="0" max="100" @bind="_onskadAtgard" />
             <span>@_onskadAtgard %</span>
         </div>
     }
     else if (_arendetyp == Arendetyp.Media)
     {
         <div>
-            <label for="onskad-atgard-text">Sökterm för media</label>
-            <input id="onskad-atgard-text" type="text"
-                   @bind="_onskadAtgardText" />
+            <label for="onskad-atgard-text">Sökterm för media (obligatoriskt)</label>
+            <input id="onskad-atgard-text" type="text" @bind="_onskadAtgardText" />
+            @if (_onskadAtgardTextError is not null)
+            {
+                <span class="field-error">@_onskadAtgardTextError</span>
+            }
         </div>
     }
 
@@ -72,14 +82,14 @@
     </div>
 
     <div>
-        <input id="forsäkran" type="checkbox" @bind="_forsäkran" />
+        <input id="forsäkran" type="checkbox" @bind="_forsakran" />
         <label for="forsäkran">
             Jag försäkrar på heder och samvete att uppgifterna är riktiga.
             (obligatoriskt)
         </label>
-        @if (_forsäkranError is not null)
+        @if (_forsakranError is not null)
         {
-            <span class="field-error">@_forsäkranError</span>
+            <span class="field-error">@_forsakranError</span>
         }
     </div>
 
@@ -104,17 +114,19 @@
     private string _onskadAtgardText = string.Empty;
     private string _motivering = string.Empty;
     private DateOnly _onskatDatum = DateOnly.FromDateTime(DateTime.Today);
-    private bool _forsäkran;
+    private bool _forsakran;
 
     private string? _personnummerError;
     private string? _motiveringError;
-    private string? _forsäkranError;
+    private string? _forsakranError;
+    private string? _onskadAtgardTextError;
 
     private async Task Submit()
     {
         _personnummerError = null;
         _motiveringError = null;
-        _forsäkranError = null;
+        _forsakranError = null;
+        _onskadAtgardTextError = null;
 
         var valid = true;
 
@@ -124,6 +136,17 @@
             _personnummerError = "Personnummer måste anges i formatet ÅÅÅÅMMDD-XXXX.";
             valid = false;
         }
+        else if (!DateOnly.TryParseExact(_personnummer[..8], "yyyyMMdd", out _))
+        {
+            _personnummerError = "Personnummer innehåller ett ogiltigt datum.";
+            valid = false;
+        }
+
+        if (_arendetyp == Arendetyp.Media && string.IsNullOrWhiteSpace(_onskadAtgardText))
+        {
+            _onskadAtgardTextError = "Sökterm krävs för uppspelning av media.";
+            valid = false;
+        }
 
         if (string.IsNullOrWhiteSpace(_motivering))
         {
@@ -131,9 +154,9 @@
             valid = false;
         }
 
-        if (!_forsäkran)
+        if (!_forsakran)
         {
-            _forsäkranError = "Du måste lämna försäkran för att skicka in ansökan.";
+            _forsakranError = "Du måste lämna försäkran för att skicka in ansökan.";
             valid = false;
         }
 

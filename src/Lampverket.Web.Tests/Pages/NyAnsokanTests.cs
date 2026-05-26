@@ -47,6 +47,31 @@ public class NyAnsokanTests
         Assert.Empty(cut.FindAll("span.field-error"));
     }
 
+    [Fact]
+    public void NyAnsokan_InvalidDatePersonnummer_ShowsError()
+    {
+        // Structurally valid but calendar-invalid date (month 99)
+        using var ctx = CreateCtx();
+        var cut = ctx.Render<NyAnsokan>();
+        cut.Find("input[id='personnummer']").Change("20009999-1234");
+        cut.Find("button[type='submit']").Click();
+        Assert.Contains("ogiltigt datum", cut.Markup);
+    }
+
+    [Fact]
+    public void NyAnsokan_Media_EmptySokterm_ShowsError()
+    {
+        using var ctx = CreateCtx();
+        var cut = ctx.Render<NyAnsokan>();
+        cut.Find("select[id='arendetyp']").Change(Arendetyp.Media.ToString());
+        // leave sökterm blank
+        cut.Find("input[id='personnummer']").Change("19900101-1234");
+        cut.Find("textarea[id='motivering']").Change("Vill lyssna på musik.");
+        cut.Find("input[id='forsäkran']").Change(true);
+        cut.Find("button[type='submit']").Click();
+        Assert.Contains("Sökterm krävs", cut.Markup);
+    }
+
     // ── backlog #6: ärendetyp dropdown ───────────────────────────────────────
     [Fact]
     public void NyAnsokan_ArendetypDropdown_HasFiveOptions()
