@@ -13,14 +13,16 @@ public sealed class McpGateway : IMcpGateway, IAsyncDisposable, IDisposable
 {
     private readonly HomeAssistantOptions _options;
     private readonly ILogger<McpGateway> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private volatile McpClient? _client;
     private int _disposed;
 
-    public McpGateway(IOptions<HomeAssistantOptions> options, ILogger<McpGateway> logger)
+    public McpGateway(IOptions<HomeAssistantOptions> options, ILogger<McpGateway> logger, IHttpClientFactory httpClientFactory)
     {
         _options = options.Value;
         _logger = logger;
+        _httpClientFactory = httpClientFactory;
     }
 
     public async Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken ct = default)
@@ -61,12 +63,10 @@ public sealed class McpGateway : IMcpGateway, IAsyncDisposable, IDisposable
         var endpointUri = new Uri(_options.BaseUrl.TrimEnd('/') + _options.McpEndpointPath);
         _logger.LogInformation("Connecting to HA MCP Server at {Endpoint}", endpointUri);
 
-        var httpClient = new HttpClient();
-        httpClient.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _options.Token);
-
+        // Factory manages the client lifetime and socket pooling; ownsHttpClient: false.
+        var httpClient = _httpClientFactory.CreateClient("HomeAssistant");
         var transportOptions = new HttpClientTransportOptions { Endpoint = endpointUri };
-        var transport = new HttpClientTransport(transportOptions, httpClient, null, ownsHttpClient: true);
+        var transport = new HttpClientTransport(transportOptions, httpClient, null, ownsHttpClient: false);
 
         return await McpClient.CreateAsync(transport, cancellationToken: ct);
     }
