@@ -77,7 +77,8 @@ public sealed class HomeAssistantClient(IMcpGateway gateway, IOptions<HomeAssist
 
     private DeviceMapEntry? FindDevice(string device) =>
         _options.Devices.FirstOrDefault(d =>
-            string.Equals(d.Friendly, device, StringComparison.OrdinalIgnoreCase));
+            string.Equals(d.Friendly, device, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(d.EntityId, device, StringComparison.OrdinalIgnoreCase));
 
     private async Task<HaResult> CallActionAsync(
         string toolName, Dictionary<string, object?> args, DeviceMapEntry entry, CancellationToken ct)

@@ -3,7 +3,10 @@
 @inject IHandlaggareService Handlaggare
 @inject IUserSession Session
 @inject NavigationManager Nav
+@inject IOptions<HomeAssistantOptions> HaOptions
 @using Lampverket.Core
+@using Lampverket.HomeAssistant.Options
+@using Microsoft.Extensions.Options
 
 <h1>Ny ansökan</h1>
 
@@ -40,9 +43,9 @@
     <div>
         <label for="berord-enhet">Berörd enhet (obligatoriskt)</label>
         <select id="berord-enhet" @bind="_berordEnhet">
-            @foreach (var enhet in _enheter)
+            @foreach (var enhet in HaOptions.Value.Devices)
             {
-                <option value="@enhet.Id">@enhet.Namn</option>
+                <option value="@enhet.EntityId">@enhet.Friendly (@enhet.Area)</option>
             }
         </select>
     </div>
@@ -100,16 +103,9 @@
 </form>
 
 @code {
-    private static readonly (string Id, string Namn)[] _enheter =
-    [
-        ("light.bedroom_banan", "Banan (Sovrum)"),
-        ("light.living_room", "Vardagsrum"),
-        ("media_player.speaker", "Högtalare")
-    ];
-
     private string _personnummer = string.Empty;
     private Arendetyp _arendetyp = Arendetyp.Tandning;
-    private string _berordEnhet = _enheter[0].Id;
+    private string _berordEnhet = string.Empty;
     private int _onskadAtgard = 50;
     private string _onskadAtgardText = string.Empty;
     private string _motivering = string.Empty;

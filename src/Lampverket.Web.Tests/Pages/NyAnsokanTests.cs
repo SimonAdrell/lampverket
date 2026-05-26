@@ -1,7 +1,9 @@
 using Bunit;
 using Lampverket.Core;
+using Lampverket.HomeAssistant.Options;
 using Lampverket.Web.Components.Pages;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Lampverket.Web.Tests.Pages;
 
@@ -13,6 +15,13 @@ public class NyAnsokanTests
         ctx.Services.AddSingleton<IHandlaggareService>(
             handlaggare ?? new FakeHandlaggareService());
         ctx.Services.AddScoped<IUserSession, FakeUserSession>();
+        ctx.Services.AddSingleton<IOptions<HomeAssistantOptions>>(Options.Create(new HomeAssistantOptions
+        {
+            Devices =
+            [
+                new DeviceMapEntry { Friendly = "Testlampa", Area = "Rum", EntityId = "light.test", Actions = ["on", "off"] }
+            ]
+        }));
         return ctx;
     }
 
