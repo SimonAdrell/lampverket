@@ -1,3 +1,5 @@
+using Lampverket.Core;
+using Lampverket.Web;
 using Lampverket.Web.Components;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -9,21 +11,20 @@ builder.Services.AddRazorComponents()
 
 builder.Services.AddOutputCache();
 
+builder.Services.AddScoped<IUserSession, UserSession>();
+builder.Services.AddSingleton<IHandlaggareService, PlaceholderHandlaggareService>();
+
 var app = builder.Build();
 
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
 
 app.UseHttpsRedirection();
-
 app.UseAntiforgery();
-
 app.UseOutputCache();
-
 app.MapStaticAssets();
 
 app.MapRazorComponents<App>()

@@ -1,0 +1,14 @@
+@page "/kvitto/{Diarienummer}"
+@rendermode InteractiveServer
+
+<h1>Din ansökan har mottagits</h1>
+
+<p>Diarienummer: <strong>@Diarienummer</strong></p>
+<p>Ärendet är nu registrerat och handläggning påbörjas omgående.</p>
+
+<a href="/arende/@Diarienummer">Följ ärendet</a>
+
+@code {
+    [Parameter]
+    public string Diarienummer { get; set; } = string.Empty;
+}
