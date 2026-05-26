@@ -10,6 +10,7 @@ public static class ServiceCollectionExtensions
     {
         // Validate required secrets at startup — fail fast before any HA call.
         services.AddOptions<HomeAssistantOptions>()
+            .BindConfiguration("HomeAssistant")
             .Validate(o => !string.IsNullOrWhiteSpace(o.BaseUrl), "HomeAssistant:BaseUrl is required.")
             .Validate(o => !string.IsNullOrWhiteSpace(o.Token), "HomeAssistant:Token is required.")
             .ValidateOnStart();

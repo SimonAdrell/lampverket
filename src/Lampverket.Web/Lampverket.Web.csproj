@@ -1,5 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
+  <PropertyGroup>
+    <UserSecretsId>lampverket-web-secrets</UserSecretsId>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Lampverket.Core\Lampverket.Core.csproj" />
     <ProjectReference Include="..\Lampverket.ServiceDefaults\Lampverket.ServiceDefaults.csproj" />
