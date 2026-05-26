@@ -9,7 +9,7 @@ namespace Lampverket.HomeAssistant;
 
 // Only place that references ModelContextProtocol SDK.
 // Singleton — lazy-initialises one McpClient; reconnects on transport close.
-public sealed class McpGateway : IMcpGateway, IAsyncDisposable
+public sealed class McpGateway : IMcpGateway, IAsyncDisposable, IDisposable
 {
     private readonly HomeAssistantOptions _options;
     private readonly ILogger<McpGateway> _logger;
@@ -74,4 +74,7 @@ public sealed class McpGateway : IMcpGateway, IAsyncDisposable
         if (_client is IAsyncDisposable d) await d.DisposeAsync();
         _lock.Dispose();
     }
+
+    // Sync fallback for DI containers that call Dispose() rather than DisposeAsync().
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 }

@@ -13,8 +13,15 @@ MCP client to Home Assistant's built-in MCP Server integration. Reads device sta
 Secrets belong in **.NET user-secrets** (dev) or environment variables (prod) — never in committed config.
 
 ```bash
-dotnet user-secrets set "HomeAssistant:BaseUrl" "http://homeassistant.local:8123"
-dotnet user-secrets set "HomeAssistant:Token"   "<long-lived-access-token>"
+# Local HA
+dotnet user-secrets set "HomeAssistant:BaseUrl"         "http://homeassistant.local:8123"
+dotnet user-secrets set "HomeAssistant:McpEndpointPath" "/mcp"
+dotnet user-secrets set "HomeAssistant:Token"           "<long-lived-access-token>"
+
+# Nabu Casa cloud
+dotnet user-secrets set "HomeAssistant:BaseUrl"         "https://<instance>.ui.nabu.casa"
+dotnet user-secrets set "HomeAssistant:McpEndpointPath" "/api/mcp"
+dotnet user-secrets set "HomeAssistant:Token"           "<long-lived-access-token>"
 ```
 
 Non-secret config goes in `appsettings.Local.json` (gitignored). See `appsettings.Example.json` for the shape.
