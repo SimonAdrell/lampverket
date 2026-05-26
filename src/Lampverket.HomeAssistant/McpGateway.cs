@@ -35,8 +35,17 @@ public sealed class McpGateway : IMcpGateway, IAsyncDisposable, IDisposable
     {
         using var activity = _activitySource.StartActivity("mcp.ListTools");
         var client = await GetClientAsync(ct);
-        var tools = await client.ListToolsAsync(cancellationToken: ct);
-        return tools.Select(t => new McpToolInfo(t.Name, t.Description)).ToList();
+        try
+        {
+            var tools = await client.ListToolsAsync(cancellationToken: ct);
+            return tools.Select(t => new McpToolInfo(t.Name, t.Description)).ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "MCP ListTools failed; invalidating client for reconnect.");
+            InvalidateClient();
+            throw;
+        }
     }
 
     public async Task<McpCallResult> CallToolAsync(string toolName, IReadOnlyDictionary<string, object?> args, CancellationToken ct = default)
@@ -46,16 +55,37 @@ public sealed class McpGateway : IMcpGateway, IAsyncDisposable, IDisposable
 
         var client = await GetClientAsync(ct);
         var argDict = args as Dictionary<string, object?> ?? new Dictionary<string, object?>(args);
-        var result = await client.CallToolAsync(toolName, argDict, cancellationToken: ct);
-        // MCP results are a list of content blocks; flatten all text blocks to one string.
-        var text = string.Join("\n", result.Content
-            .OfType<TextContentBlock>()
-            .Select(b => b.Text));
+        try
+        {
+            var result = await client.CallToolAsync(toolName, argDict, cancellationToken: ct);
+            // MCP results are a list of content blocks; flatten all text blocks to one string.
+            var text = string.Join("\n", result.Content
+                .OfType<TextContentBlock>()
+                .Select(b => b.Text));
 
-        if (result.IsError ?? false)
-            activity?.SetStatus(ActivityStatusCode.Error, text);
+            if (result.IsError ?? false)
+                activity?.SetStatus(ActivityStatusCode.Error, text);
 
-        return new McpCallResult(result.IsError ?? false, text);
+            return new McpCallResult(result.IsError ?? false, text);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "MCP tool {ToolName} failed; invalidating client for reconnect.", toolName);
+            InvalidateClient();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Clears the cached <see cref="McpClient"/> so the next call triggers a fresh connection.
+    /// Called on any transport-level exception. The old client is disposed best-effort;
+    /// if it only implements <see cref="IAsyncDisposable"/>, the GC handles final cleanup.
+    /// </summary>
+    private void InvalidateClient()
+    {
+        var old = _client;
+        _client = null;          // volatile write — immediately visible to other threads
+        (old as IDisposable)?.Dispose();
     }
 
     private async Task<McpClient> GetClientAsync(CancellationToken ct)

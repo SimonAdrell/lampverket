@@ -9,17 +9,27 @@ namespace Lampverket.HomeAssistant;
 /// A 200 response confirms the server is reachable and the token is valid.
 /// Tagged "ready" and "external" so it can be filtered separately from the liveness check.
 /// </summary>
-internal sealed class HomeAssistantHealthCheck(
-    IHttpClientFactory factory,
-    IOptions<HomeAssistantOptions> opts) : IHealthCheck
+/// <remarks>
+/// Uses a short-lived <see cref="HttpClient"/> directly rather than <see cref="IHttpClientFactory"/>
+/// so the check bypasses the factory's resilience pipeline (retry + circuit breaker).
+/// A health check against an unreachable host must fail fast, not retry.
+/// </remarks>
+internal sealed class HomeAssistantHealthCheck(IOptions<HomeAssistantOptions> opts) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext ctx, CancellationToken ct = default)
     {
         try
         {
-            var client = factory.CreateClient("HomeAssistant");
+            using var client = new HttpClient();
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", opts.Value.Token);
+
             var uri = new Uri(opts.Value.BaseUrl.TrimEnd('/') + "/api/");
             using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct);
+
+            // 401 is a permanent configuration error (bad/expired token), not a transient degradation.
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                return HealthCheckResult.Unhealthy("Home Assistant token is invalid or expired.");
 
             return response.IsSuccessStatusCode
                 ? HealthCheckResult.Healthy()
