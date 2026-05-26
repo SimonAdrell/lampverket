@@ -14,7 +14,7 @@ public sealed class McpGateway : IMcpGateway, IAsyncDisposable, IDisposable
     private readonly HomeAssistantOptions _options;
     private readonly ILogger<McpGateway> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
-    private McpClient? _client;
+    private volatile McpClient? _client;
 
     public McpGateway(IOptions<HomeAssistantOptions> options, ILogger<McpGateway> logger)
     {
@@ -76,5 +76,11 @@ public sealed class McpGateway : IMcpGateway, IAsyncDisposable, IDisposable
     }
 
     // Sync fallback for DI containers that call Dispose() rather than DisposeAsync().
-    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+    // ASP.NET Core DI prefers IAsyncDisposable when both are implemented, so this path
+    // is a last-resort safety net. Avoid blocking on async I/O here — deadlock risk.
+    public void Dispose()
+    {
+        (_client as IDisposable)?.Dispose();
+        _lock.Dispose();
+    }
 }

@@ -141,7 +141,9 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
             }
         }
 
-        bool isAvailable = state is not "unavailable" and not "unknown";
+        // Allowlist: only "on" and "off" are treated as available.
+        // null (device absent from response), "unavailable", "unknown" → not available.
+        bool isAvailable = state is "on" or "off";
         bool isOn = state == "on";
         // Brightness on READ is 0-255; convert to 0-100 percent.
         int? brightnessPercent = brightness is not null && int.TryParse(brightness, out var raw)

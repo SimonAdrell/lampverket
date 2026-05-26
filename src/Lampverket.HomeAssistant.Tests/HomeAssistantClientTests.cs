@@ -40,6 +40,27 @@ public class HomeAssistantClientTests
             brightness:
         """;
 
+    private const string UnknownStateFixture = """
+        Live Context: An overview of the areas and the devices in this smart home:
+        - names: Banan
+          domain: light
+          state: 'unknown'
+          areas: Bedroom
+          attributes:
+            brightness:
+        """;
+
+    // Device is in the map but absent from the GetLiveContext response entirely.
+    private const string DeviceAbsentFixture = """
+        Live Context: An overview of the areas and the devices in this smart home:
+        - names: Annan lampa
+          domain: light
+          state: 'on'
+          areas: Kitchen
+          attributes:
+            brightness: '100'
+        """;
+
     // -----------------------------------------------------------------------
     // Test helpers
     // -----------------------------------------------------------------------
@@ -395,5 +416,90 @@ public class HomeAssistantClientTests
         Assert.Equal(2, tools.Count);
         Assert.Contains(tools, t => t.Name == "HassTurnOn");
         Assert.Contains(tools, t => t.Name == "GetLiveContext");
+    }
+
+    // -----------------------------------------------------------------------
+    // #8b — state: 'unknown' → DeviceUnavailable (same as unavailable)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetStateAsync_UnknownStateFixture_IsAvailableFalse()
+    {
+        var fake = new FakeMcpGateway();
+        fake.Returns("GetLiveContext", new McpCallResult(false, UnknownStateFixture));
+        var sut = CreateSut(fake);
+
+        var state = await sut.GetStateAsync("Banan");
+
+        Assert.False(state.IsAvailable);
+        Assert.False(state.IsOn);
+    }
+
+    [Fact]
+    public async Task TurnOnAsync_UnknownState_ReturnsDeviceUnavailable()
+    {
+        var fake = new FakeMcpGateway();
+        fake.Returns("GetLiveContext", new McpCallResult(false, UnknownStateFixture));
+        var sut = CreateSut(fake);
+
+        var result = await sut.TurnOnAsync("Banan");
+
+        Assert.IsType<HaResult.DeviceUnavailable>(result);
+    }
+
+    // -----------------------------------------------------------------------
+    // Parser: device absent from GetLiveContext response → IsAvailable = false
+    // (state == null falls through allowlist)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetStateAsync_DeviceAbsentFromYaml_IsAvailableFalse()
+    {
+        var fake = new FakeMcpGateway();
+        fake.Returns("GetLiveContext", new McpCallResult(false, DeviceAbsentFixture));
+        var sut = CreateSut(fake);
+
+        var state = await sut.GetStateAsync("Banan");
+
+        Assert.False(state.IsAvailable);
+        Assert.False(state.IsOn);
+        Assert.Null(state.BrightnessPercent);
+    }
+
+    // -----------------------------------------------------------------------
+    // DeviceNotFound coverage for remaining action methods
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task SetBrightnessAsync_UnknownDevice_ReturnsDeviceNotFound()
+    {
+        var fake = new FakeMcpGateway();
+        var sut = CreateSut(fake);
+
+        var result = await sut.SetBrightnessAsync("Lampa som inte finns", 50);
+
+        Assert.IsType<HaResult.DeviceNotFound>(result);
+    }
+
+    [Fact]
+    public async Task SetVolumeAsync_UnknownDevice_ReturnsDeviceNotFound()
+    {
+        var fake = new FakeMcpGateway();
+        var sut = CreateSut(fake);
+
+        var result = await sut.SetVolumeAsync("Högtalare som inte finns", 50);
+
+        Assert.IsType<HaResult.DeviceNotFound>(result);
+    }
+
+    [Fact]
+    public async Task PlayMediaAsync_UnknownDevice_ReturnsDeviceNotFound()
+    {
+        var fake = new FakeMcpGateway();
+        var sut = CreateSut(fake);
+
+        var result = await sut.PlayMediaAsync("Högtalare som inte finns", "jazz");
+
+        Assert.IsType<HaResult.DeviceNotFound>(result);
     }
 }
