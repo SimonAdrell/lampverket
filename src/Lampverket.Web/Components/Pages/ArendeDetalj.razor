@@ -1,0 +1,70 @@
+@page "/arende/{Diarienummer}"
+@rendermode InteractiveServer
+@inject IHandlaggareService Handlaggare
+@using Lampverket.Core
+
+<h1>Ärende @Diarienummer</h1>
+
+@if (_arende is null)
+{
+    <p>Laddar…</p>
+}
+else if (_arende.Beslut is null)
+{
+    <p class="status-pill status-underhandlaggning">Under handläggning</p>
+    <p>Ärendet bereds. Beslutet presenteras här när handläggningen är klar.</p>
+}
+else
+{
+    <div class="beslut-card">
+        <pre class="beslut-header">LAMPVERKET
+Myndigheten för Hemautomation
+
+BESLUT</pre>
+        <table class="beslut-meta">
+            <tr><th>Diarienummer:</th><td>@_arende.Diarienummer</td></tr>
+            <tr><th>Datum:</th><td>@_arende.Beslut.Datum.ToString("yyyy-MM-dd")</td></tr>
+            <tr><th>Handläggare:</th><td>Handläggaragent "Bo Sken"</td></tr>
+            <tr><th>Sökande:</th><td>@_arende.Ansokan.Sokande</td></tr>
+        </table>
+
+        <p class="beslut-typ">@_arende.Beslut.Beslutstyp</p>
+        <p>@_arende.Beslut.Beslutstext</p>
+
+        <h3>Motivering</h3>
+        <p>@_arende.Beslut.Motivering</p>
+
+        @if (_arende.Beslut.Lagrum.Length > 0)
+        {
+            <ul>
+                @foreach (var lag in _arende.Beslut.Lagrum)
+                {
+                    <li>@lag</li>
+                }
+            </ul>
+        }
+
+        <h3>Hur man överklagar</h3>
+        <p>@_arende.Beslut.Overklagandehanvisning</p>
+
+        <h3>Verkställighet</h3>
+        <p>@_arende.Beslut.Verkstallighet</p>
+
+        @if (_arende.Beslut.Beslutstyp is Beslutstyp.Avslag or Beslutstyp.Avvisning)
+        {
+            <a class="overklaga-btn" href="/ny-ansokan">Överklaga beslut</a>
+        }
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string Diarienummer { get; set; } = string.Empty;
+
+    private Core.Arende? _arende;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _arende = await Handlaggare.HamtaArendeAsync(Diarienummer);
+    }
+}

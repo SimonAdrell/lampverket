@@ -1,0 +1,39 @@
+@page "/logga-in"
+@rendermode InteractiveServer
+@inject IUserSession Session
+@inject NavigationManager Nav
+@using Lampverket.Core
+
+<h1>Logga in med Mobilt BankID</h1>
+
+<div class="bankid-container">
+    <div class="bankid-logo" aria-hidden="true">
+        <span class="bankid-symbol">🏦</span>
+    </div>
+
+    <p>Öppna BankID-appen i din mobil och skanna koden nedan.</p>
+
+    <div class="bankid-qr" aria-label="QR-kod för BankID">
+        <div class="bankid-qr-placeholder">▓▓▓▓▓▓▓▓▓▓<br/>▓      ▓<br/>▓  ▓▓  ▓<br/>▓      ▓<br/>▓▓▓▓▓▓▓▓▓▓</div>
+    </div>
+
+    <p class="bankid-hint">Eller ange ditt namn nedan och bekräfta.</p>
+
+    <form @onsubmit="Bekrafta" @onsubmit:preventDefault="true">
+        <div>
+            <label for="namn">Namn</label>
+            <input id="namn" type="text" @bind="_namn" placeholder="Ditt namn" />
+        </div>
+        <button type="submit">Bekräfta identitet</button>
+    </form>
+</div>
+
+@code {
+    private string _namn = string.Empty;
+
+    private void Bekrafta()
+    {
+        Session.Namn = string.IsNullOrWhiteSpace(_namn) ? "Medborgare" : _namn;
+        Nav.NavigateTo("/ny-ansokan");
+    }
+}

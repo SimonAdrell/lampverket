@@ -1,0 +1,24 @@
+@page "/kvitto/{Diarienummer}"
+@rendermode InteractiveServer
+@using Lampverket.Core
+
+<h1>Din ansökan har mottagits</h1>
+
+<p>Diarienummer: <strong>@Diarienummer</strong></p>
+
+<div class="koplats-box">
+    <p>Du är nummer <strong>@_koplats</strong> i kön.</p>
+    <p>Beräknad handläggningstid: <strong>@_sekunder sekunder</strong>.</p>
+</div>
+
+<p>Ärendet handläggs omgående av Handläggaragent "Bo Sken" i enlighet med gällande lagstiftning.</p>
+
+<a href="/arende/@Diarienummer" class="follow-link">Följ ärendet →</a>
+
+@code {
+    [Parameter]
+    public string Diarienummer { get; set; } = string.Empty;
+
+    private readonly int _koplats = Random.Shared.Next(2, 7);
+    private readonly int _sekunder = Random.Shared.Next(6, 12);
+}

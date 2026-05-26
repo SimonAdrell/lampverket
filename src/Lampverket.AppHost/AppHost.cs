@@ -5,16 +5,13 @@ var builder = DistributedApplication.CreateBuilder(args);
 // (HomeAssistant:BaseUrl), not through this connection string.
 // WithReference wires the dependency edge so the dashboard shows it and
 // future WaitFor/health-gate support can hook in when the agent project exists.
-var homeAssistant = builder.AddConnectionString("HomeAssistant");
+// var homeAssistant = builder.AddConnectionString("HomeAssistant");
 
 var apiService = builder.AddProject<Projects.Lampverket_ApiService>("apiservice")
-    .WithHttpHealthCheck("/health")
-    .WithReference(homeAssistant);
+    .WithHttpHealthCheck("/health");
 
 builder.AddProject<Projects.Lampverket_Web>("webfrontend")
     .WithExternalHttpEndpoints()
-    .WithHttpHealthCheck("/health")
-    .WithReference(apiService)
-    .WaitFor(apiService);
+    .WithHttpHealthCheck("/health");
 
 builder.Build().Run();

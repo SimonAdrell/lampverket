@@ -1,23 +1,38 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
-
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+<header class="lv-header">
+    <div class="lv-col">
+        <div class="lv-brand">
+            <a href="/">Lampverket</a>
+            <span class="lv-brand-sub">Myndigheten för Hemautomation</span>
         </div>
+        <nav class="lv-topnav">
+            <NavLink href="/" Match="NavLinkMatch.All">Start</NavLink>
+            <NavLink href="/logga-in">Logga in</NavLink>
+            <NavLink href="/ny-ansokan">Ny ansökan</NavLink>
+            <NavLink href="/mina-arenden">Mina ärenden</NavLink>
+        </nav>
+    </div>
+</header>
 
-        <article class="content px-4">
-            @Body
-        </article>
-    </main>
-</div>
+<main class="lv-col">
+    @Body
+</main>
+
+<footer class="lv-footer">
+    <div class="lv-col">
+        <p>
+            Lampverket — Myndigheten för Hemautomation &nbsp;|&nbsp;
+            Org.nr 202600-0001 &nbsp;|&nbsp;
+            Öppettider: Mån-Tor 08-17, Fre 08-14 &nbsp;|&nbsp;
+            <a href="/tillganglighet">Tillgänglighetsredogörelse</a>
+        </p>
+        <p>Postadress: Hemautomationsgatan 1, 123 45 Hemstaden</p>
+    </div>
+</footer>
 
 <div id="blazor-error-ui">
-    An unhandled error has occurred.
-    <a href="" class="reload">Reload</a>
-    <a class="dismiss">🗙</a>
+    Ett fel har uppstått.
+    <a href="" class="reload">Ladda om</a>
+    <a role="button" tabindex="0" class="dismiss">✕</a>
 </div>
