@@ -10,6 +10,49 @@ Lampverket governs a small, explicit allow-list of Home Assistant devices. This 
 - Home Assistant's built-in **MCP Server** integration enabled and reachable from `Lampverket.HomeAssistant` (the C# MCP SDK connects to it to read state + call Assist tools).
 - A long-lived access token (used by the MCP client to authenticate to Home Assistant), stored in **.NET user-secrets** (dev) or an environment variable (never committed).
 
+## MCP integration notes
+
+Operational details that aren't obvious from reading the SDK and that bit us once already — keep these documented so future-you doesn't rediscover them with `tcpdump`.
+
+### MCP endpoint path
+
+The MCP Server is exposed at different paths depending on how you reach the HA instance:
+
+| Deployment | `HomeAssistant:McpEndpointPath` |
+| --- | --- |
+| Local HA (direct LAN, `http://homeassistant.local:8123`) | `/mcp` |
+| Nabu Casa cloud (`https://*.ui.nabu.casa`) | `/api/mcp` |
+
+Configured per environment in `appsettings.Local.json` / user-secrets. The default in code is `/mcp`.
+
+### `GetLiveContext` response shape
+
+`GetLiveContext` returns YAML, not JSON. Real fixture captured from a live HA instance:
+
+```yaml
+- names: Banan
+  domain: light
+  state: 'on'
+  areas: Bedroom
+  attributes:
+    brightness: '153'
+```
+
+Notes:
+
+- The `state` value is quoted (`'on'`, `'off'`).
+- When the light is **off**, the `brightness:` line is still present but empty.
+- States other than `on`/`off` (`unavailable`, `unknown`, missing entirely) are treated as **not available** by `HomeAssistantClient` and yield a *bordläggning* in character.
+
+### Brightness scaling — read vs. write asymmetry
+
+| Direction | Range | Notes |
+| --- | --- | --- |
+| **Read** (`GetLiveContext` → `attributes.brightness`) | 0–255 | Raw HA value. Divide by 255 then multiply by 100 to get percent. |
+| **Write** (`HassLightSet` → `brightness` arg) | 0–100 | HA's MCP Assist tool accepts percent directly. |
+
+`HomeAssistantClient.ParseLiveContextResponse` does the read-side `0-255 → 0-100` conversion so the rest of the codebase only ever sees percent.
+
 ## Example device model
 
 A representative home, grouped by area. Each entry lists the actions the device supports and the Home Assistant tool used.
