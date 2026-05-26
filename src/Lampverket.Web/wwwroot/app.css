@@ -254,7 +254,7 @@ button[type="submit"]:disabled,
 }
 
 .status-pill.inkommet      { background: #e8f0f8; color: var(--lv-blue); }
-.status-pill.handlaggning  { background: #fff3cd; color: #7a5800; }
+.status-pill.underhandlaggning { background: #fff3cd; color: #7a5800; }
 .status-pill.beslutat      { background: #e8f5e9; color: var(--lv-success); }
 .status-pill.verkstallt    { background: #e8f5e9; color: var(--lv-success); border: 1px solid var(--lv-success); }
 .status-pill.overklagat    { background: #fdecea; color: var(--lv-reject); }
