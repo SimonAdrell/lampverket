@@ -1,4 +1,37 @@
 @page "/"
+@inject TimeProvider Clock
+
+@{
+    var now = Clock.GetLocalNow();
+    var isFika = now.DayOfWeek == DayOfWeek.Friday && now.Hour == 14;
+}
+
+@if (isFika)
+{
+    <div class="driftinfo-banner">
+        <strong>Driftinformation:</strong> Lampverket har fika fredagar kl. 14:00–15:00.
+        Ansökningar som inkommer under denna tid avslås automatiskt.
+        Återkom efter kl. 15:00.
+    </div>
+}
 
 <h1>Lampverket</h1>
-<p>Myndigheten för Hemautomation</p>
+<p class="subtitle">Myndigheten för Hemautomation</p>
+
+<section class="etjanster">
+    <h2>E-tjänster</h2>
+    <ul>
+        <li><a href="/ny-ansokan">Ny ansökan om åtgärd</a></li>
+        <li><a href="/mina-arenden">Mina ärenden</a></li>
+    </ul>
+</section>
+
+<section class="om-myndigheten">
+    <h2>Om Lampverket</h2>
+    <p>
+        Lampverket — Myndigheten för Hemautomation — handlägger ansökningar
+        om åtgärder avseende belysning, media och volym i hemmiljö.
+        Samtliga ärenden registreras i diariet och beslutas av handläggaragent "Bo Sken"
+        i enlighet med lagen (2026:1) om skälig hemtrevnad.
+    </p>
+</section>

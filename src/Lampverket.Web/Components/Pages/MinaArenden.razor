@@ -1,0 +1,48 @@
+@page "/mina-arenden"
+@rendermode InteractiveServer
+@inject IDiariet Diariet
+@using Lampverket.Core
+
+<h1>Mina ärenden</h1>
+
+@if (_arenden is null)
+{
+    <p>Laddar…</p>
+}
+else if (_arenden.Count == 0)
+{
+    <p>Du har inga registrerade ärenden.</p>
+}
+else
+{
+    <table class="arenden-table">
+        <thead>
+            <tr>
+                <th>Diarienummer</th>
+                <th>Datum</th>
+                <th>Ärendetyp</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var arende in _arenden)
+            {
+                <tr>
+                    <td><a href="/arende/@arende.Diarienummer">@arende.Diarienummer</a></td>
+                    <td>@arende.Mottaget.ToString("yyyy-MM-dd")</td>
+                    <td>@arende.Ansokan.Arendetyp</td>
+                    <td><span class="status-pill status-@arende.Status.ToString().ToLower()">@arende.Status</span></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private IReadOnlyList<Arende>? _arenden;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _arenden = await Diariet.HamtaAllaAsync();
+    }
+}

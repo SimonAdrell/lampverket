@@ -49,6 +49,11 @@ BESLUT</pre>
 
         <h3>Verkställighet</h3>
         <p>@_arende.Beslut.Verkstallighet</p>
+
+        @if (_arende.Beslut.Beslutstyp is Beslutstyp.Avslag or Beslutstyp.Avvisning)
+        {
+            <a class="overklaga-btn" href="/ny-ansokan">Överklaga beslut</a>
+        }
     </div>
 }
 

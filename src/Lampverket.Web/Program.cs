@@ -13,6 +13,8 @@ builder.Services.AddOutputCache();
 
 builder.Services.AddScoped<IUserSession, UserSession>();
 builder.Services.AddSingleton<IHandlaggareService, PlaceholderHandlaggareService>();
+builder.Services.AddSingleton<IDiariet, InMemoryDiariet>();
+builder.Services.AddSingleton(TimeProvider.System);
 
 var app = builder.Build();
 
