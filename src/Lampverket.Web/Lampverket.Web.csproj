@@ -3,6 +3,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Lampverket.Core\Lampverket.Core.csproj" />
     <ProjectReference Include="..\Lampverket.ServiceDefaults\Lampverket.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\Lampverket.Agent\Lampverket.Agent.csproj" />
+    <ProjectReference Include="..\Lampverket.HomeAssistant\Lampverket.HomeAssistant.csproj" />
   </ItemGroup>
 
 </Project>

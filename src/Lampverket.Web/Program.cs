@@ -1,4 +1,6 @@
+using Lampverket.Agent;
 using Lampverket.Core;
+using Lampverket.HomeAssistant;
 using Lampverket.Web;
 using Lampverket.Web.Components;
 
@@ -12,9 +14,11 @@ builder.Services.AddRazorComponents()
 builder.Services.AddOutputCache();
 
 builder.Services.AddScoped<IUserSession, UserSession>();
-builder.Services.AddSingleton<IHandlaggareService, PlaceholderHandlaggareService>();
 builder.Services.AddSingleton<IDiariet, InMemoryDiariet>();
 builder.Services.AddSingleton(TimeProvider.System);
+
+builder.Services.AddHomeAssistant();
+builder.Services.AddAgent(builder.Configuration);
 
 var app = builder.Build();
 
