@@ -1,0 +1,163 @@
+@page "/ny-ansokan"
+@rendermode InteractiveServer
+@inject IHandlaggareService Handlaggare
+@inject IUserSession Session
+@inject NavigationManager Nav
+@using Lampverket.Core
+
+<h1>Ny ansökan</h1>
+
+<form @onsubmit="Submit" @onsubmit:preventDefault="true">
+    <div>
+        <label for="personnummer">Personnummer (obligatoriskt)</label>
+        <input id="personnummer" type="text" placeholder="ÅÅÅÅMMDD-XXXX"
+               @bind="_personnummer" />
+        @if (_personnummerError is not null)
+        {
+            <span class="field-error">@_personnummerError</span>
+        }
+    </div>
+
+    <div>
+        <label for="arendetyp">Ärendetyp (obligatoriskt)</label>
+        <select id="arendetyp" @bind="_arendetyp">
+            <option value="@Arendetyp.Tandning">Tändning av belysning</option>
+            <option value="@Arendetyp.Slackning">Släckning av belysning</option>
+            <option value="@Arendetyp.Ljusstyrka">Justering av ljusstyrka</option>
+            <option value="@Arendetyp.Media">Uppspelning av media</option>
+            <option value="@Arendetyp.Volym">Justering av volym</option>
+        </select>
+    </div>
+
+    <div>
+        <label for="berord-enhet">Berörd enhet (obligatoriskt)</label>
+        <select id="berord-enhet" @bind="_berordEnhet">
+            @foreach (var enhet in _enheter)
+            {
+                <option value="@enhet.Id">@enhet.Namn</option>
+            }
+        </select>
+    </div>
+
+    @if (_arendetyp == Arendetyp.Ljusstyrka || _arendetyp == Arendetyp.Volym)
+    {
+        <div>
+            <label for="onskad-atgard-range">Önskad nivå (0–100 %)</label>
+            <input id="onskad-atgard-range" type="range" min="0" max="100"
+                   @bind="_onskadAtgard" />
+            <span>@_onskadAtgard %</span>
+        </div>
+    }
+    else if (_arendetyp == Arendetyp.Media)
+    {
+        <div>
+            <label for="onskad-atgard-text">Sökterm för media</label>
+            <input id="onskad-atgard-text" type="text"
+                   @bind="_onskadAtgardText" />
+        </div>
+    }
+
+    <div>
+        <label for="motivering">Motivering till ansökan (obligatoriskt)</label>
+        <textarea id="motivering" @bind="_motivering"></textarea>
+        @if (_motiveringError is not null)
+        {
+            <span class="field-error">@_motiveringError</span>
+        }
+    </div>
+
+    <div>
+        <label for="onskat-datum">Önskat verkställighetsdatum</label>
+        <input id="onskat-datum" type="date" @bind="_onskatDatum" />
+    </div>
+
+    <div>
+        <input id="forsäkran" type="checkbox" @bind="_forsäkran" />
+        <label for="forsäkran">
+            Jag försäkrar på heder och samvete att uppgifterna är riktiga.
+            (obligatoriskt)
+        </label>
+        @if (_forsäkranError is not null)
+        {
+            <span class="field-error">@_forsäkranError</span>
+        }
+    </div>
+
+    <div>
+        <button type="submit">Skicka in ansökan</button>
+        <a href="/">Avbryt</a>
+    </div>
+</form>
+
+@code {
+    private static readonly (string Id, string Namn)[] _enheter =
+    [
+        ("light.bedroom_banan", "Banan (Sovrum)"),
+        ("light.living_room", "Vardagsrum"),
+        ("media_player.speaker", "Högtalare")
+    ];
+
+    private string _personnummer = string.Empty;
+    private Arendetyp _arendetyp = Arendetyp.Tandning;
+    private string _berordEnhet = _enheter[0].Id;
+    private int _onskadAtgard = 50;
+    private string _onskadAtgardText = string.Empty;
+    private string _motivering = string.Empty;
+    private DateOnly _onskatDatum = DateOnly.FromDateTime(DateTime.Today);
+    private bool _forsäkran;
+
+    private string? _personnummerError;
+    private string? _motiveringError;
+    private string? _forsäkranError;
+
+    private async Task Submit()
+    {
+        _personnummerError = null;
+        _motiveringError = null;
+        _forsäkranError = null;
+
+        var valid = true;
+
+        if (!System.Text.RegularExpressions.Regex.IsMatch(
+                _personnummer, @"^\d{8}-\d{4}$"))
+        {
+            _personnummerError = "Personnummer måste anges i formatet ÅÅÅÅMMDD-XXXX.";
+            valid = false;
+        }
+
+        if (string.IsNullOrWhiteSpace(_motivering))
+        {
+            _motiveringError = "Motivering krävs.";
+            valid = false;
+        }
+
+        if (!_forsäkran)
+        {
+            _forsäkranError = "Du måste lämna försäkran för att skicka in ansökan.";
+            valid = false;
+        }
+
+        if (!valid) return;
+
+        string? onskadAtgard = _arendetyp switch
+        {
+            Arendetyp.Ljusstyrka or Arendetyp.Volym => _onskadAtgard.ToString(),
+            Arendetyp.Media => _onskadAtgardText,
+            _ => null
+        };
+
+        var ansokan = new Ansokan
+        {
+            Personnummer = _personnummer,
+            Sokande = Session.Namn ?? _personnummer,
+            Arendetyp = _arendetyp,
+            BerordEnhet = _berordEnhet,
+            OnskadAtgard = onskadAtgard,
+            Motivering = _motivering,
+            OnskatDatum = _onskatDatum
+        };
+
+        var arende = await Handlaggare.RegisterAnsokanAsync(ansokan);
+        Nav.NavigateTo($"/kvitto/{arende.Diarienummer}");
+    }
+}
