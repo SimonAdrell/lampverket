@@ -46,6 +46,17 @@ Scope discipline: MCP from the start, JSONL before SQLite, one agent. BankID gag
 6. **The fika gag.** Show a Friday-14:30 submission → automatic *avslag*: *"Lampverket har fika."*
 7. **The audit trail.** Mina ärenden / the diariet — every action stamped. Close on: *"…the same case-handling pattern real authorities use, in C#, pointed at my light switches."*
 
+## Known issues — must fix before Block D
+
+These are placeholder shortcuts that are acceptable during front-end TDD but will
+break the real end-to-end flow the moment `Lampverket.Agent` is wired in.
+
+| # | File | Issue | Required fix |
+|---|------|-------|--------------|
+| C3a | `src/Lampverket.Web/PlaceholderHandlaggareService.cs` | `RegisterAnsokanAsync` creates the `Arende` but never calls `IDiariet.AppendAsync` — `MinaArenden` is always empty | Real `HandlaggareService.RegisterAnsokanAsync` must call `IDiariet.AppendAsync(arende)` after assigning the diarienummer |
+| C3b | `src/Lampverket.Web/PlaceholderHandlaggareService.cs` | `HamtaArendeAsync` always returns `null` — `ArendeDetalj` shows "Laddar…" forever after every submission | Real service must look up by diarienummer; also add a "not found" branch in `ArendeDetalj.razor` for unknown diarienummer |
+| C4 | `src/Lampverket.Web/InMemoryDiariet.cs` | `List<Arende>` mutated from multiple concurrent Blazor Server circuits with no synchronisation (registered as `Singleton`) — concurrent `AppendAsync` calls race; `HamtaAllaAsync` can throw `InvalidOperationException` during a concurrent add | Wrap mutations in `lock (_lock)`, or replace `List<T>` with `ImmutableList` + `Interlocked` swap, before wiring live traffic |
+
 ## Stretch ideas (post-weekend)
 
 - **Verksamhetsberättelse** — a scheduled job emitting a deadpan daily/annual report: ärenden received, beslut issued, average *handläggningstid*, *medborgarnöjdhet*.
