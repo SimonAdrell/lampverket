@@ -15,6 +15,7 @@ public sealed class McpGateway : IMcpGateway, IAsyncDisposable, IDisposable
     private readonly ILogger<McpGateway> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private volatile McpClient? _client;
+    private int _disposed;
 
     public McpGateway(IOptions<HomeAssistantOptions> options, ILogger<McpGateway> logger)
     {
@@ -29,10 +30,11 @@ public sealed class McpGateway : IMcpGateway, IAsyncDisposable, IDisposable
         return tools.Select(t => new McpToolInfo(t.Name, t.Description)).ToList();
     }
 
-    public async Task<McpCallResult> CallToolAsync(string toolName, Dictionary<string, object?> args, CancellationToken ct = default)
+    public async Task<McpCallResult> CallToolAsync(string toolName, IReadOnlyDictionary<string, object?> args, CancellationToken ct = default)
     {
         var client = await GetClientAsync(ct);
-        var result = await client.CallToolAsync(toolName, args, cancellationToken: ct);
+        var argDict = args as Dictionary<string, object?> ?? new Dictionary<string, object?>(args);
+        var result = await client.CallToolAsync(toolName, argDict, cancellationToken: ct);
         // MCP results are a list of content blocks; flatten all text blocks to one string.
         var text = string.Join("\n", result.Content
             .OfType<TextContentBlock>()
@@ -71,6 +73,7 @@ public sealed class McpGateway : IMcpGateway, IAsyncDisposable, IDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         if (_client is IAsyncDisposable d) await d.DisposeAsync();
         _lock.Dispose();
     }
@@ -80,6 +83,7 @@ public sealed class McpGateway : IMcpGateway, IAsyncDisposable, IDisposable
     // is a last-resort safety net. Avoid blocking on async I/O here — deadlock risk.
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         (_client as IDisposable)?.Dispose();
         _lock.Dispose();
     }

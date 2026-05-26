@@ -19,17 +19,20 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
     // Public API
     // -----------------------------------------------------------------------
 
+    /// <summary>
+    /// Returns the current state of a device from Home Assistant.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="device"/> is not present in the device map.
+    /// Unlike the action methods (which return <see cref="HaResult.DeviceNotFound"/>),
+    /// this method throws because <see cref="DeviceState"/> has no failure variant.
+    /// </exception>
     public async Task<DeviceState> GetStateAsync(string device, CancellationToken ct = default)
     {
         var entry = FindDevice(device)
             ?? throw new ArgumentException($"Device '{device}' not in device map.", nameof(device));
 
-        var result = await _gateway.CallToolAsync(
-            _options.Tools.GetLiveContext,
-            new Dictionary<string, object?> { ["name"] = entry.EntityId },
-            ct);
-
-        return ParseLiveContextResponse(result.Content, entry);
+        return await GetStateForEntryAsync(entry, ct);
     }
 
     public Task<HaResult> TurnOnAsync(string device, CancellationToken ct = default)
@@ -93,11 +96,22 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
     private async Task<HaResult> CallActionAsync(
         string toolName, Dictionary<string, object?> args, DeviceMapEntry entry, CancellationToken ct)
     {
-        var state = await GetStateAsync(entry.Friendly, ct);
+        // Pre-check: avoid calling HA on unavailable/unknown devices.
+        // Pass the already-resolved entry directly to skip a second FindDevice lookup.
+        var state = await GetStateForEntryAsync(entry, ct);
         if (!state.IsAvailable) return new HaResult.DeviceUnavailable(entry.Friendly);
 
         var result = await _gateway.CallToolAsync(toolName, args, ct);
         return result.IsError ? new HaResult.ToolError(result.Content) : new HaResult.Ok();
+    }
+
+    private async Task<DeviceState> GetStateForEntryAsync(DeviceMapEntry entry, CancellationToken ct)
+    {
+        var result = await _gateway.CallToolAsync(
+            _options.Tools.GetLiveContext,
+            new Dictionary<string, object?> { ["name"] = entry.EntityId },
+            ct);
+        return ParseLiveContextResponse(result.Content, entry);
     }
 
     // -----------------------------------------------------------------------
@@ -114,7 +128,7 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
 
     private static DeviceState ParseLiveContextResponse(string content, DeviceMapEntry entry)
     {
-        var lines = content.Split('\n');
+        var lines = content.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
         bool inBlock = false;
         string? state = null;
         string? brightness = null;

@@ -20,7 +20,7 @@ public sealed class FakeMcpGateway : IMcpGateway
     public Task<IReadOnlyList<McpToolInfo>> ListToolsAsync(CancellationToken ct = default) =>
         Task.FromResult(ToolList);
 
-    public Task<McpCallResult> CallToolAsync(string toolName, Dictionary<string, object?> args, CancellationToken ct = default)
+    public Task<McpCallResult> CallToolAsync(string toolName, IReadOnlyDictionary<string, object?> args, CancellationToken ct = default)
     {
         Calls.Add((toolName, new Dictionary<string, object?>(args)));
         var result = _perToolResults.TryGetValue(toolName, out var r) ? r : _defaultResult;

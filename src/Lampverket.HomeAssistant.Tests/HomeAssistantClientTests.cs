@@ -365,6 +365,8 @@ public class HomeAssistantClientTests
 
         var unavailable = Assert.IsType<HaResult.DeviceUnavailable>(result);
         Assert.Equal("Banan", unavailable.Name);
+        // Pre-check must prevent the action tool from ever being called.
+        Assert.DoesNotContain(fake.Calls, c => c.ToolName == "HassTurnOn");
     }
 
     [Fact]
@@ -501,5 +503,55 @@ public class HomeAssistantClientTests
         var result = await sut.PlayMediaAsync("Högtalare som inte finns", "jazz");
 
         Assert.IsType<HaResult.DeviceNotFound>(result);
+    }
+
+    // -----------------------------------------------------------------------
+    // GetStateAsync contract — throws for unknown device (no HaResult variant
+    // exists on DeviceState; action methods return DeviceNotFound instead)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetStateAsync_UnknownDevice_ThrowsArgumentException()
+    {
+        var fake = new FakeMcpGateway();
+        var sut = CreateSut(fake);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => sut.GetStateAsync("Enhet som inte finns"));
+    }
+
+    // -----------------------------------------------------------------------
+    // ToolError propagation — shared CallActionAsync path; verify for TurnOff
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task TurnOffAsync_ToolError_ReturnsToolError()
+    {
+        var fake = new FakeMcpGateway();
+        SetupAvailable(fake);
+        fake.Returns("HassTurnOff", new McpCallResult(true, "Device communication error"));
+        var sut = CreateSut(fake);
+
+        var result = await sut.TurnOffAsync("Banan");
+
+        var error = Assert.IsType<HaResult.ToolError>(result);
+        Assert.Equal("Device communication error", error.Message);
+    }
+
+    // -----------------------------------------------------------------------
+    // Parser: CRLF line endings handled correctly
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetStateAsync_CrlfLineEndings_ParsesCorrectly()
+    {
+        var crlf = OnFixture.Replace("\n", "\r\n");
+        var fake = new FakeMcpGateway();
+        fake.Returns("GetLiveContext", new McpCallResult(false, crlf));
+        var sut = CreateSut(fake);
+
+        var state = await sut.GetStateAsync("Banan");
+
+        Assert.True(state.IsOn);
+        Assert.Equal(60, state.BrightnessPercent);
     }
 }
