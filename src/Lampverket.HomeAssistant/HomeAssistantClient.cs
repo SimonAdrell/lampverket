@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Lampverket.HomeAssistant.Models;
 using Lampverket.HomeAssistant.Options;
 using Microsoft.Extensions.Options;
@@ -101,6 +102,16 @@ public sealed class HomeAssistantClient(IMcpGateway gateway, IOptions<HomeAssist
 
     private static DeviceState ParseLiveContextResponse(string content, DeviceMapEntry entry)
     {
+        // HA MCP returns {"success": true, "result": "..."} — unwrap the YAML from the JSON envelope.
+        // JsonDocument.Parse also decodes \n escape sequences to actual newlines.
+        try
+        {
+            using var doc = JsonDocument.Parse(content);
+            if (doc.RootElement.TryGetProperty("result", out var resultElem))
+                content = resultElem.GetString() ?? content;
+        }
+        catch (JsonException) { }
+
         var lines = content.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
         bool inBlock = false;
         string? state = null;
