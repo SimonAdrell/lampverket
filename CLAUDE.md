@@ -57,7 +57,7 @@ These are load-bearing for the project to "work" as intended:
 
 1. **Stay in character.** The handläggare ("Bo Sken") is a deadpan Swedish civil servant. The comedy comes from competence and formality, never from breaking character.
 2. **Swedish domain terms are intentional — keep them.** In prose *and* in code: domain types use Swedish names (`Ansokan`, `Arende`, `Beslut`, `Diarienummer`, `Beslutstyp`). Drop diacritics in identifiers (`Arende`), keep å/ä/ö in user-facing strings. See `docs/BUREAUCRACY.md` for the glossary.
-3. **No action without a decision.** Claude must call `lamna_beslut` *before* any Home Assistant action tool. Enforced by a C# guard in `HandlaggareAgent` that returns an `is_error` tool result for any HA tool emitted before the beslut.
+3. **No action without a decision.** Claude must call `lamna_beslut` *before* any Home Assistant action tool. Enforced by a C# guard in `HaToolFactory.GuardHaTool` that returns an error tool-result (a normal, non-`is_error` result) for any HA action tool emitted before the beslut.
 4. **Everything is logged.** Every ärende (received, decided, executed, appealed) is appended to the diariet with its diarienummer. The audit trail is a feature.
 5. **Respect the state machine.** Inkommet → Beslutat → Verkställt (bifall/delvis bifall, execution confirmed; stays Beslutat if it fails), or Inkommet → Beslutat (avslag/avvisning), or Inkommet → Bordlagt. "Under handläggning" is derived (no `Beslut` yet), not a stored status. See `docs/ARCHITECTURE.md`.
 6. **Check before acting.** Claude must call `GetLiveContext` for the affected entity before issuing the beslut (instructed via the system prompt).

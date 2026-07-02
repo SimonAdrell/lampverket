@@ -71,7 +71,7 @@ A whimsically named device (e.g. a bedroom light called "Banan") is encouraged �
 
 ## Reading state
 
-Before deciding, Claude calls `GetLiveContext` for the affected entity (per the system prompt protocol; enforced indirectly — actions without a preceding beslut are blocked by the C# guard in `HandlaggareAgent`). This drives several personality rules:
+Before deciding, Claude calls `GetLiveContext` for the affected entity (instructed by the system prompt protocol). This is a prompt-level convention, not a C# invariant: `GetLiveContext` is exempt from the beslut guard, so nothing forces the read — the C# guard only enforces beslut-*before-action*, which is a separate rule. This drives several personality rules:
 
 - **Already on?** → *avslag* (obehövligt ärende).
 - **Unavailable?** → *bordläggning* in character.

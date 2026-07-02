@@ -26,8 +26,8 @@ Scope discipline: MCP from the start, JSONL before SQLite, one agent. BankID gag
 
 - [x] Solution builds; projects wired (`Web`, `Core`, `Agent`, `Agent.Tests`, `Web.Tests`, Aspire trio)
 - [x] HA MCP integration (inside `Lampverket.Agent`) reads state and can turn on the hero light from C#
-- [ ] Bo Sken system prompt complete and in character
-- [ ] Claude returns a schema-valid `beslut` via tool-use; C# validates it
+- [x] Bo Sken system prompt complete and in character
+- [x] Claude returns a schema-valid `beslut` via tool-use; C# validates it
 - [x] Form on `/ny-ansokan` produces an `Ansokan` and a `diarienummer`
 - [ ] On bifall the light actually changes
 - [ ] Every ärende appended to the diariet

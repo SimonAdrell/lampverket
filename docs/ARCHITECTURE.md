@@ -81,11 +81,11 @@ Agent autonomy is layered with deterministic guards. The agent loop enforces the
 | Layer | Owner | Enforcement |
 | --- | --- | --- |
 | Decision flow | Claude | Tool choices, ordering, when to stop |
-| **Beslut before action** | C# guard | If a HA tool is called before `lamna_beslut`, return an `is_error` tool result instructing Claude to issue a beslut first |
+| **Beslut before action** | C# guard (`HaToolFactory.GuardHaTool`) | If a HA action tool is called before `lamna_beslut`, return an error tool-result (a normal, non-`is_error` result) instructing Claude to issue a beslut first |
 | **Max iterations** | C# guard | Hard cap on loop turns; log and bordlägg on exhaustion |
 | Allowed entities | System prompt + config | Entity IDs listed in the prompt come from `HomeAssistantOptions.Devices` |
 | Audit | `HandlaggareService` + diariet | Every ärende append-logged at intake and after the agent returns |
-| Prompt cost | `cache_control: ephemeral` | System prompt cached across loop turns |
+| Prompt cost | `cache_control: ephemeral` | The `lamna_beslut` tool definition is marked ephemeral today. Caching the system prompt and the HA tool list across loop turns is planned but not yet wired (tracked as an issue). |
 
 **Division of labour:** Claude *decides and orchestrates*; C# *enforces invariants, executes side effects, and audits*. The HA MCP call is still a real side effect — it just travels through Claude's `tool_use`, not through a `HandlaggareService.VerkstallAsync` switch statement.
 
@@ -93,7 +93,7 @@ Agent autonomy is layered with deterministic guards. The agent loop enforces the
 
 - **Read:** current device/area state — via `GetLiveContext`.
 - **Act:** turn on/off, set brightness, set volume, play media — via `HassTurnOn` / `HassTurnOff` / `HassLightSet` / `HassSetVolume` / `HassMediaSearchAndPlay`.
-- Implemented with the official **C# MCP SDK** (`ModelContextProtocol`) plus the Anthropic SDK's `Anthropic.Mcp` helper. `HandlaggareAgent` holds an `McpClient` connected to Home Assistant's built-in **MCP Server**. At first ärende it calls `BetaMcp.ListToolsAsync(mcpClient, cacheControl: ephemeral)` once — the resulting `IBetaRunnableTool[]` is reused for every loop. Tool calls flow through `BetaToolRunner`, wrapped by a guard delegate that enforces beslut-before-action. The `HomeAssistant/` sub-folder of the Agent project holds the bound `HomeAssistantOptions`, `DeviceMapEntry` configuration record, and `HomeAssistantHealthCheck`. See [`DEVICES.md`](DEVICES.md).
+- Implemented with the official **C# MCP SDK** (`ModelContextProtocol`) plus the Anthropic SDK's `Anthropic.Mcp` helper. `HandlaggareAgent` holds an `McpClient` connected to Home Assistant's built-in **MCP Server**. At first ärende it calls `BetaMcp.ListToolsAsync(mcpClient)` once — the resulting `IBetaRunnableTool[]` is reused for every loop. Tool calls flow through `BetaToolRunner`, wrapped by a guard delegate (`HaToolFactory.GuardHaTool`) that enforces beslut-before-action. The `HomeAssistant/` sub-folder of the Agent project holds the bound `HomeAssistantOptions`, `DeviceMapEntry` configuration record, and `HomeAssistantHealthCheck`. See [`DEVICES.md`](DEVICES.md).
 
 ### Diariet (Lampverket.Core)
 
@@ -156,7 +156,7 @@ The log is **append-only by rule** — corrections are issued as new ärenden (a
 
 - **Unavailable device** → Claude sees the failure tool-result and issues a *bordläggs*-style beslut; logged, not crashed.
 - **Ambiguous request** → *avvisning* asking the applicant to complete the application.
-- **Claude calls a HA action before `lamna_beslut`** → C# returns an `is_error` tool result instructing Claude to issue a beslut first. After a small fixed number of ordering violations, the loop exits with an auto-bordläggning.
+- **Claude calls a HA action before `lamna_beslut`** → the C# guard (`HaToolFactory.GuardHaTool`) returns an error tool-result instructing Claude to issue a beslut first; the call never reaches HA. There is no dedicated violation counter — the only bound on repeated attempts is `MaxIterations`.
 - **Claude returns an invalid/wrong-shaped beslut** → JSON deserialisation logs a warning; loop continues so Claude can correct on the next turn. If no valid beslut by `MaxIterations`, *bordlägg* with a *handläggningsfel* note.
 - **MaxIterations reached** → loop exits with a *handläggningsfel* bordläggning; the unfinished trail is preserved in the diariet for debugging.
 - **Home Assistant call fails** → the MCP `is_error` reaches Claude as a tool result; Claude amends the beslut's `verkstallighet` field accordingly; the diariet records the final state.
