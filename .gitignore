@@ -89,3 +89,7 @@ diariet/*.local.*
 Thumbs.db
 .idea/
 .vscode/
+
+
+# Prompt eval
+prompt/output.*

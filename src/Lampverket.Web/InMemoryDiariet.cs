@@ -7,6 +7,7 @@ internal sealed class InMemoryDiariet : IDiariet
 {
     private readonly List<Arende> _arenden = [];
     private readonly Lock _lock = new();
+    private int _counter;
 
     public Task AppendAsync(Arende arende)
     {
@@ -16,9 +17,7 @@ internal sealed class InMemoryDiariet : IDiariet
 
     public Task<IReadOnlyList<Arende>> HamtaAllaAsync()
     {
-        List<Arende> snapshot;
-        lock (_lock) { snapshot = [.. _arenden]; }
-        return Task.FromResult<IReadOnlyList<Arende>>(snapshot.AsReadOnly());
+        lock (_lock) { return Task.FromResult<IReadOnlyList<Arende>>([.. _arenden]); }
     }
 
     public Task<Arende?> HamtaAsync(string diarienummer)
@@ -26,5 +25,11 @@ internal sealed class InMemoryDiariet : IDiariet
         Arende? arende;
         lock (_lock) { arende = _arenden.LastOrDefault(a => a.Diarienummer == diarienummer); }
         return Task.FromResult(arende);
+    }
+
+    public Task<string> AllokeraDiarienummerAsync(int year)
+    {
+        var nr = Interlocked.Increment(ref _counter);
+        return Task.FromResult($"LV-{year}-{nr:D6}");
     }
 }

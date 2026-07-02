@@ -1,7 +1,7 @@
-namespace Lampverket.Agent;
-
 using System.Text.Json;
-using Anthropic.Models.Messages;
+using Anthropic.Models.Beta.Messages;
+
+namespace Lampverket.Agent;
 
 internal static class BeslutsSchema
 {
@@ -23,13 +23,13 @@ internal static class BeslutsSchema
             ["motivering"] = JsonSerializer.SerializeToElement(new
             {
                 type = "string",
-                description = "1–3 meningar. Citera lagrum och förklara varför."
+                description = "1-3 meningar. Citera lagrum och förklara varför."
             }),
             ["lagrum"] = JsonSerializer.SerializeToElement(new
             {
                 type = "array",
                 items = new { type = "string" },
-                description = "Citeerade lagrum, t.ex. ['7 § lagen (2026:1) om skälig hemtrevnad']."
+                description = "Citerade lagrum, t.ex. ['7 § lagen (2026:1) om skälig hemtrevnad']."
             }),
             ["overklagandehanvisning"] = JsonSerializer.SerializeToElement(new
             {

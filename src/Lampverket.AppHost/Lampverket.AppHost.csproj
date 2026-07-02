@@ -6,7 +6,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Lampverket.ApiService\Lampverket.ApiService.csproj" />
     <ProjectReference Include="..\Lampverket.Web\Lampverket.Web.csproj" />
   </ItemGroup>
 

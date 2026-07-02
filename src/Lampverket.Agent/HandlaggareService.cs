@@ -1,169 +1,135 @@
+using System.Threading.Channels;
+using Lampverket.Core;
+using Microsoft.Extensions.Logging;
+
 namespace Lampverket.Agent;
 
-using Lampverket.Core;
-using Lampverket.HomeAssistant;
-using Lampverket.HomeAssistant.Models;
-
-public sealed class HandlaggareService : IHandlaggareService
+public sealed class HandlaggareService(IDiariet diariet, IHandlaggareAgent agent, TimeProvider clock,
+    IArendeNotifier notifier, ChannelWriter<string> queue, ILogger<HandlaggareService> logger) : IAnsokanService, IArendeProcessor
 {
+    private static readonly TimeOnly FikaStart = new(14, 0);
+    private static readonly TimeOnly FikaSlut = new(15, 0);
+
     private static readonly TimeZoneInfo _stockholmTz =
         TimeZoneInfo.FindSystemTimeZoneById("Europe/Stockholm");
 
-    private readonly IDiariet _diariet;
-    private readonly IHomeAssistantClient _ha;
-    private readonly IClaudeClient _claude;
-    private readonly TimeProvider _clock;
-    private int _counter;
-
-    public HandlaggareService(IDiariet diariet, IHomeAssistantClient ha, IClaudeClient claude, TimeProvider clock)
-    {
-        _diariet = diariet;
-        _ha = ha;
-        _claude = claude;
-        _clock = clock;
-    }
+    private readonly IDiariet _diariet = diariet;
+    private readonly IHandlaggareAgent _agent = agent;
+    private readonly TimeProvider _clock = clock;
+    private readonly IArendeNotifier _notifier = notifier;
+    private readonly ChannelWriter<string> _queue = queue;
+    private readonly ILogger<HandlaggareService> _logger = logger;
 
     public async Task<Arende> RegisterAnsokanAsync(Ansokan ansokan)
     {
         var now = _clock.GetUtcNow();
-        var nr = Interlocked.Increment(ref _counter);
-        var diarienummer = $"LV-{now.Year}-{nr:D6}";
-
-        var arende = new Arende
-        {
-            Diarienummer = diarienummer,
-            Mottaget = now,
-            Ansokan = ansokan,
-            Status = Arendestatus.Inkommet
-        };
+        var diarienummer = await _diariet.AllokeraDiarienummerAsync(now.Year);
+        var arende = new Arende(diarienummer, now, ansokan, Arendestatus.Inkommet);
 
         await _diariet.AppendAsync(arende);
+        await _queue.WriteAsync(diarienummer);
 
-        Beslut beslut;
+        return arende;
+    }
 
-        if (ArFikahelgd(now))
+    public async Task ProcessArendeAsync(string diarienummer, CancellationToken ct = default)
+    {
+        var arende = await _diariet.HamtaAsync(diarienummer);
+
+        if (arende is null)
         {
-            beslut = BygAvslag(now,
-                "Lampverket befinner sig för tillfället på obligatorisk fikahelgd.",
-                "Ansökan inkom under fikahelgd (fredagar kl. 14:00–15:00). Myndigheten är stängd under denna tid.",
-                ["Förordningen (2026:42) om fikahelgd"],
-                "Detta beslut kan överklagas till Hemautomationsöverdomstolen inom tre veckor.");
+            _logger.LogWarning("Ärende {Diarienummer} saknas i diariet; handläggning avbryts.", diarienummer);
+            return;
         }
-        else
+
+        Arende final;
+        try
         {
-            DeviceState state;
+            var resultat = await DetermineBeslutAsync(arende, _clock.GetUtcNow(), ct);
+            final = await FinaliseAsync(arende, resultat);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Finaliseringen (t.ex. en diariet-skrivning) sket sig. Notifiera ändå med en bordläggning
+            // så den väntande sidan inte hänger på "Under handläggning" för evigt.
+            _logger.LogError(ex, "Finalisering misslyckades för {Diarienummer}; notifierar med bordläggning.", diarienummer);
+            final = arende with { Status = Arendestatus.Bordlagt, Beslut = Beslut.BordlaggHandlaggningsfel(_clock.GetUtcNow()) };
             try
             {
-                state = await _ha.GetStateAsync(ansokan.BerordEnhet);
+                await _diariet.AppendAsync(final);
             }
-            catch (ArgumentException)
+            catch (Exception persistEx)
             {
-                beslut = BygAvslag(now,
-                    "Lampverket kan inte verkställa ärendet — enheten är okänd.",
-                    "Den angivna enheten finns inte i Lampverkets enhetsregister. Ärendet bordläggs.",
-                    [],
-                    "Kontakta Lampverket för rättelse av enhetsuppgifter.");
-                return await FinaliseAsync(arende, beslut);
-            }
-
-            if (!state.IsAvailable)
-            {
-                beslut = BygBordlaggning(now, ansokan.BerordEnhet);
-            }
-            else if (ArObehövligtArende(ansokan, state))
-            {
-                beslut = BygAvslag(now,
-                    "Lampverket avslår ansökan.",
-                    $"Enheten befinner sig redan i det önskade tillståndet. Åtgärden är obehövlig.",
-                    ["7 § lagen (2026:1) om skälig hemtrevnad"],
-                    "Beslutet kan överklagas till Hemautomationsöverdomstolen inom tre veckor.");
-            }
-            else
-            {
-                beslut = await _claude.BegarBeslutAsync(arende, FormatState(state)) ??
-                    BygBordlaggning(now, ansokan.BerordEnhet, "Handläggaragentens svar var ogiltigt.");
-
-                if (beslut.Beslutstyp is Beslutstyp.Bifall or Beslutstyp.DelvisBifall)
-                {
-                    var haResult = await VerkstallAsync(ansokan, beslut);
-                    if (haResult is HaResult.DeviceUnavailable or HaResult.ToolError)
-                        beslut = BygBordlaggning(now, ansokan.BerordEnhet);
-                }
+                _logger.LogError(persistEx, "Kunde inte skriva bordläggning till diariet för {Diarienummer}.", diarienummer);
             }
         }
 
-        return await FinaliseAsync(arende, beslut);
+        await _notifier.NotifyAsync(diarienummer, final);
     }
+
+    private async Task<Handlaggningsresultat> DetermineBeslutAsync(Arende arende, DateTimeOffset now, CancellationToken ct)
+    {
+        if (ArFikahelgd(now))
+        {
+            return new Handlaggningsresultat(new Avslag(
+                "Lampverket befinner sig för tillfället på obligatorisk fikahelgd.",
+                "Ansökan inkom under fikahelgd (fredagar kl. 14:00-15:00). Myndigheten är stängd under denna tid.",
+                ["Förordningen (2026:42) om fikahelgd"],
+                "Detta beslut kan överklagas till Hemautomationsöverdomstolen inom tre veckor.",
+                now), null);
+        }
+
+        try
+        {
+            return await _agent.HandlaggaAsync(arende, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Handläggningsfel för {Diarienummer}.", arende.Diarienummer);
+            return new Handlaggningsresultat(Beslut.BordlaggHandlaggningsfel(now), null);
+        }
+    }
+
 
     public Task<Arende?> HamtaArendeAsync(string diarienummer) =>
         _diariet.HamtaAsync(diarienummer);
 
-    private async Task<Arende> FinaliseAsync(Arende arende, Beslut beslut)
+    // Tvåfas: skriv först beslutsfasen (Beslutat/Bordlagt), sedan — om beslutet medger verkställighet
+    // — verkställighetsfasen, vars status stäms av mot det observerade utfallet. Diariet får båda
+    // stegen som separata poster; audit-loggen berättar sanningen om vad som faktiskt hände.
+    private async Task<Arende> FinaliseAsync(Arende arende, Handlaggningsresultat resultat)
     {
-        var status = beslut.Beslutstyp is Beslutstyp.Bifall or Beslutstyp.DelvisBifall
-            ? Arendestatus.Verkstallt
-            : Arendestatus.Beslutat;
+        var beslut = resultat.Beslut;
 
-        var final = arende with { Status = status, Beslut = beslut };
-        await _diariet.AppendAsync(final);
-        return final;
-    }
+        var beslutat = arende with { Status = beslut.ResulterandeStatus, Beslut = beslut };
+        await _diariet.AppendAsync(beslutat);
 
-    private async Task<HaResult> VerkstallAsync(Ansokan ansokan, Beslut beslut)
-    {
-        _ = beslut; // beslut recorded; HA call is the side effect
-        return ansokan.Arendetyp switch
+        if (!beslut.TillaterVerkstallighet)
         {
-            Arendetyp.Tandning => await _ha.TurnOnAsync(ansokan.BerordEnhet),
-            Arendetyp.Slackning => await _ha.TurnOffAsync(ansokan.BerordEnhet),
-            Arendetyp.Ljusstyrka when int.TryParse(ansokan.OnskadAtgard, out var pct)
-                => await _ha.SetBrightnessAsync(ansokan.BerordEnhet, pct),
-            Arendetyp.Volym when int.TryParse(ansokan.OnskadAtgard, out var pct)
-                => await _ha.SetVolumeAsync(ansokan.BerordEnhet, pct),
-            Arendetyp.Media when ansokan.OnskadAtgard is not null
-                => await _ha.PlayMediaAsync(ansokan.BerordEnhet, ansokan.OnskadAtgard),
-            _ => new HaResult.Ok()
-        };
+            return beslutat;
+        }
+
+        var (status, utfall) = Verkstallighetsregler.Avgor(beslut, resultat.Verkstallighetsutfall);
+        var verkstalld = beslutat with { Status = status, Verkstallighetsutfall = utfall };
+        await _diariet.AppendAsync(verkstalld);
+
+        return verkstalld;
     }
 
-    private bool ArFikahelgd(DateTimeOffset utcNow)
+    private static bool ArFikahelgd(DateTimeOffset utcNow)
     {
         var stockholm = TimeZoneInfo.ConvertTime(utcNow, _stockholmTz);
-        return stockholm.DayOfWeek == DayOfWeek.Friday && stockholm.Hour == 14;
+        var tid = TimeOnly.FromDateTime(stockholm.DateTime);
+        return stockholm.DayOfWeek == DayOfWeek.Friday
+            && tid >= FikaStart && tid < FikaSlut;
     }
 
-    private static bool ArObehövligtArende(Ansokan ansokan, DeviceState state) =>
-        ansokan.Arendetyp switch
-        {
-            Arendetyp.Tandning => state.IsOn,
-            Arendetyp.Slackning => !state.IsOn,
-            _ => false
-        };
-
-    private static Beslut BygAvslag(DateTimeOffset now, string beslutstext, string motivering,
-        string[] lagrum, string overklagandehanvisning) => new()
-    {
-        Beslutstyp = Beslutstyp.Avslag,
-        Beslutstext = beslutstext,
-        Motivering = motivering,
-        Lagrum = lagrum,
-        Overklagandehanvisning = overklagandehanvisning,
-        Verkstallighet = "Ingen åtgärd vidtagen.",
-        Datum = now
-    };
-
-    private static Beslut BygBordlaggning(DateTimeOffset now, string enhet, string? extra = null) => new()
-    {
-        Beslutstyp = Beslutstyp.Avslag,
-        Beslutstext = "Lampverket bordlägger ärendet.",
-        Motivering = extra ?? $"Enheten \"{enhet}\" är ur funktion; ärendet bordläggs tills vidare.",
-        Lagrum = [],
-        Overklagandehanvisning = "Beslutet kan överklagas till Hemautomationsöverdomstolen inom tre veckor.",
-        Verkstallighet = "Ingen åtgärd vidtagen.",
-        Datum = now
-    };
-
-    private static string FormatState(DeviceState state) =>
-        $"Enhet: {state.FriendlyName} | Tillstånd: {(state.IsOn ? "på" : "av")}" +
-        (state.BrightnessPercent.HasValue ? $" | Ljusstyrka: {state.BrightnessPercent}%" : "");
 }

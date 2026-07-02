@@ -1,11 +1,11 @@
 @page "/ny-ansokan"
 @rendermode InteractiveServer
-@inject IHandlaggareService Handlaggare
+@inject IAnsokanService Handlaggare
 @inject IUserSession Session
 @inject NavigationManager Nav
 @inject IOptions<HomeAssistantOptions> HaOptions
+@using Lampverket.Agent.HomeAssistant
 @using Lampverket.Core
-@using Lampverket.HomeAssistant.Options
 @using Microsoft.Extensions.Options
 
 <h1>Ny ansökan</h1>
@@ -32,33 +32,36 @@
     <div>
         <label for="arendetyp">Ärendetyp (obligatoriskt)</label>
         <select id="arendetyp" @bind="_arendetyp">
-            <option value="@Arendetyp.Tandning">Tändning av belysning</option>
-            <option value="@Arendetyp.Slackning">Släckning av belysning</option>
-            <option value="@Arendetyp.Ljusstyrka">Justering av ljusstyrka</option>
-            <option value="@Arendetyp.Media">Uppspelning av media</option>
-            <option value="@Arendetyp.Volym">Justering av volym</option>
+            @foreach (var t in Enum.GetValues<Arendetyp>())
+            {
+                <option value="@t">@t.Text()</option>
+            }
         </select>
     </div>
 
     <div>
         <label for="berord-enhet">Berörd enhet (obligatoriskt)</label>
         <select id="berord-enhet" @bind="_berordEnhet">
-            @foreach (var enhet in HaOptions.Value.Devices)
+            @foreach (DeviceMapEntry enhet in HaOptions.Value.Devices)
             {
                 <option value="@enhet.EntityId">@enhet.Friendly (@enhet.Area)</option>
             }
         </select>
+        @if (_berordEnhetError is not null)
+        {
+            <span class="field-error">@_berordEnhetError</span>
+        }
     </div>
 
-    @if (_arendetyp == Arendetyp.Ljusstyrka || _arendetyp == Arendetyp.Volym)
+    @if (_arendetyp is Arendetyp.Ljusstyrka or Arendetyp.Volym)
     {
         <div>
-            <label for="onskad-atgard-range">Önskad nivå (0–100 %)</label>
+            <label for="onskad-atgard-range">Önskad nivå (0-100 %)</label>
             <input id="onskad-atgard-range" type="range" min="0" max="100" @bind="_onskadAtgard" />
             <span>@_onskadAtgard %</span>
         </div>
     }
-    else if (_arendetyp == Arendetyp.Media)
+    else if (_arendetyp is Arendetyp.Media)
     {
         <div>
             <label for="onskad-atgard-text">Sökterm för media (obligatoriskt)</label>
@@ -104,7 +107,7 @@
 
 @code {
     private string _personnummer = string.Empty;
-    private Arendetyp _arendetyp = Arendetyp.Tandning;
+    private Arendetyp _arendetyp;
     private string _berordEnhet = string.Empty;
     private int _onskadAtgard = 50;
     private string _onskadAtgardText = string.Empty;
@@ -116,6 +119,16 @@
     private string? _motiveringError;
     private string? _forsakranError;
     private string? _onskadAtgardTextError;
+    private string? _berordEnhetError;
+
+    protected override void OnInitialized()
+    {
+        var first = HaOptions.Value.Devices.FirstOrDefault();
+        if (first is not null)
+        {
+            _berordEnhet = first.EntityId;
+        }
+    }
 
     private async Task Submit()
     {
@@ -123,8 +136,16 @@
         _motiveringError = null;
         _forsakranError = null;
         _onskadAtgardTextError = null;
+        _berordEnhetError = null;
 
         var valid = true;
+
+        var device = HaOptions.Value.Devices.FirstOrDefault(d => d.EntityId == _berordEnhet);
+        if (device is null)
+        {
+            _berordEnhetError = "Välj en giltig enhet.";
+            valid = false;
+        }
 
         if (!System.Text.RegularExpressions.Regex.IsMatch(
                 _personnummer, @"^\d{8}-\d{4}$"))
@@ -138,7 +159,7 @@
             valid = false;
         }
 
-        if (_arendetyp == Arendetyp.Media && string.IsNullOrWhiteSpace(_onskadAtgardText))
+        if (_arendetyp is Arendetyp.Media && string.IsNullOrWhiteSpace(_onskadAtgardText))
         {
             _onskadAtgardTextError = "Sökterm krävs för uppspelning av media.";
             valid = false;
@@ -156,7 +177,10 @@
             valid = false;
         }
 
-        if (!valid) return;
+        if (!valid)
+        {
+            return;
+        }
 
         string? onskadAtgard = _arendetyp switch
         {
@@ -170,13 +194,13 @@
             Personnummer = _personnummer,
             Sokande = Session.Namn ?? _personnummer,
             Arendetyp = _arendetyp,
-            BerordEnhet = _berordEnhet,
+            BerordEnhet = new Enhet(device!.EntityId, device.Friendly),
             OnskadAtgard = onskadAtgard,
             Motivering = _motivering,
             OnskatDatum = _onskatDatum
         };
 
         var arende = await Handlaggare.RegisterAnsokanAsync(ansokan);
-        Nav.NavigateTo($"/kvitto/{arende.Diarienummer}");
+        Nav.NavigateTo($"/arende/{arende.Diarienummer}");
     }
 }

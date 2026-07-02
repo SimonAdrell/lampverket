@@ -257,7 +257,17 @@ button[type="submit"]:disabled,
 .status-pill.underhandlaggning { background: #fff3cd; color: #7a5800; }
 .status-pill.beslutat      { background: #e8f5e9; color: var(--lv-success); }
 .status-pill.verkstallt    { background: #e8f5e9; color: var(--lv-success); border: 1px solid var(--lv-success); }
+.status-pill.bordlagt      { background: #fff3cd; color: #7a5800; }
 .status-pill.overklagat    { background: #fdecea; color: var(--lv-reject); }
+
+/* Verkställighetshinder: beslut fattat men åtgärden kunde inte utföras. */
+.verkstallighet-hinder {
+    padding: 0.6rem 0.8rem;
+    background: #fff3cd;
+    color: #7a5800;
+    border-left: 3px solid #c79100;
+    border-radius: 2px;
+}
 
 /* ── Beslut card ─────────────────────────────────────────────────────────── */
 .beslut-card {

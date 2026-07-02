@@ -1,15 +1,11 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/Lampverket.ApiService/Lampverket.ApiService.csproj" />
-    <Project Path="src/Lampverket.AppHost/Lampverket.AppHost.csproj" />
+<Project Path="src/Lampverket.AppHost/Lampverket.AppHost.csproj" />
     <Project Path="src/Lampverket.ServiceDefaults/Lampverket.ServiceDefaults.csproj" />
     <Project Path="src/Lampverket.Web/Lampverket.Web.csproj" />
     <Project Path="src/Lampverket.Core/Lampverket.Core.csproj" />
-    <Project Path="src/Lampverket.HomeAssistant/Lampverket.HomeAssistant.csproj" />
-    <Project Path="src/Lampverket.HomeAssistant.Tests/Lampverket.HomeAssistant.Tests.csproj" />
-    <Project Path="src/Lampverket.Web.Tests/Lampverket.Web.Tests.csproj" />
-    <Project Path="src/Lampverket.HomeAssistant.TryIt/Lampverket.HomeAssistant.TryIt.csproj" />
     <Project Path="src/Lampverket.Agent/Lampverket.Agent.csproj" />
-    <Project Path="src/Lampverket.Agent.Tests/Lampverket.Agent.Tests.csproj" />
+    <Project Path="src/tests/Lampverket.Web.Tests/Lampverket.Web.Tests.csproj" />
+    <Project Path="src/tests/Lampverket.Agent.Tests/Lampverket.Agent.Tests.csproj" />
   </Folder>
 </Solution>
