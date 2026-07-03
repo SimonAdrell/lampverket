@@ -130,13 +130,15 @@ public class ArendeTests
     }
 
     [Fact]
-    public void Arende_BifallEjPakallad_ShowsNoHinder()
+    public void Arende_BifallUtanAtgard_ShowsEjBekraftatNotFact()
     {
+        // Bifall där inget verkställande anrop gjordes: status Beslutat, utfall null.
+        // Åtgärden får inte presenteras som utförd; visa "ännu inte bekräftats", inte hinder-framing.
         var decided = new FakeArendeService(new Core.Arende(
             Diarienummer: "LV-2026-000001",
             Mottaget: DateTimeOffset.UtcNow,
             Ansokan: FakeAnsokan(),
-            Status: Arendestatus.Verkstallt,
+            Status: Arendestatus.Beslutat,
             Beslut: new Core.Bifall(
                 Beslutstext: "Lampverket beviljar ansökan.",
                 Motivering: "OK.",
@@ -144,14 +146,17 @@ public class ArendeTests
                 Overklagandehanvisning: "Kan överklagas.",
                 VerkstallighetsText: "Lampan tänds.",
                 Datum: DateTimeOffset.UtcNow),
-            Verkstallighetsutfall: Verkstallighetsstatus.EjPakallad
+            Verkstallighetsutfall: null
         ));
         using var ctx = CreateCtx(decided);
         var cut = ctx.Render<ArendeDetalj>(p =>
             p.Add(x => x.Diarienummer, "LV-2026-000001"));
 
+        // Ärlig framställning: beslutad åtgärd, ännu ej bekräftad — inte "hinder" (inget försök misslyckades).
+        Assert.Contains("Beslutad åtgärd:", cut.Markup);
+        Assert.Contains("ännu inte bekräftats", cut.Markup);
         Assert.DoesNotContain("Verkställighetshinder", cut.Markup);
-        Assert.Contains("redan i beslutat läge", cut.Markup);
+        Assert.Contains("status-pill beslutat", cut.Markup);
     }
 
     [Fact]

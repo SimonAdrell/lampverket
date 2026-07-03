@@ -19,10 +19,10 @@ public static class Verkstallighetsregler
         {
             // Anropet gjordes och sket sig: beslutet står kvar, men ärendet når aldrig Verkställt.
             Verkstallighetsstatus.Misslyckad => (Arendestatus.Beslutat, Verkstallighetsstatus.Misslyckad),
-            // Anropet gjordes och lyckades.
+            // Anropet gjordes och lyckades — enda vägen till Verkställt.
             Verkstallighetsstatus.Verkstalld => (Arendestatus.Verkstallt, Verkstallighetsstatus.Verkstalld),
-            // Inget anrop gjordes (enheten redan i önskat läge) — nedgradera inte.
-            _ => (Arendestatus.Verkstallt, Verkstallighetsstatus.EjPakallad),
+            // Inget anrop gjordes: beslutet står, men ingen åtgärd bekräftad → stanna i Beslutat.
+            _ => (Arendestatus.Beslutat, null),
         };
     }
 }

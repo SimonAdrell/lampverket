@@ -66,22 +66,27 @@ BESLUT</pre>
         @if (_arende.Beslut is VerkstalltBeslut verk)
         {
             <h3>Verkställighet</h3>
-            @switch (_arende.Verkstallighetsutfall)
+            @* Verkställt ⇒ åtgärden bekräftad (även äldre diariet-rader utan utfall). Beslutat betyder
+               att åtgärden ännu inte verkställts — antingen misslyckat försök eller inget försök alls. *@
+            @if (_arende.Status == Arendestatus.Verkstallt)
             {
-                case Verkstallighetsstatus.Misslyckad:
-                    <p>Beslutad åtgärd: @verk.Verkstallighet</p>
-                    <p class="verkstallighet-hinder">
-                        Verkställighetshinder: beslutet har fattats men åtgärden kunde inte verkställas.
-                        Ärendet kvarstår i status Beslutat i avvaktan på förnyad verkställighet.
-                    </p>
-                    break;
-                case Verkstallighetsstatus.EjPakallad:
-                    <p>@verk.Verkstallighet</p>
-                    <p>Ingen åtgärd erfordrades; den berörda enheten befann sig redan i beslutat läge.</p>
-                    break;
-                default:
-                    <p>@verk.Verkstallighet</p>
-                    break;
+                <p>@verk.Verkstallighet</p>
+            }
+            else if (_arende.Verkstallighetsutfall == Verkstallighetsstatus.Misslyckad)
+            {
+                <p>Beslutad åtgärd: @verk.Verkstallighet</p>
+                <p class="verkstallighet-hinder">
+                    Verkställighetshinder: beslutet har fattats men åtgärden kunde inte verkställas.
+                    Ärendet kvarstår i status Beslutat i avvaktan på förnyad verkställighet.
+                </p>
+            }
+            else
+            {
+                <p>Beslutad åtgärd: @verk.Verkstallighet</p>
+                <p class="verkstallighet-hinder">
+                    Verkställighet har ännu inte bekräftats. Ärendet kvarstår i status
+                    Beslutat i avvaktan på verkställighet.
+                </p>
             }
         }
 
