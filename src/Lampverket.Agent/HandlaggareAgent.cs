@@ -18,6 +18,10 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
 {
     private const int MaxIterations = 10;
 
+    // Verkställighetsnudgen: en avgränsad andra runda. Lyckoscenariot är GetLiveContext →
+    // verkställande anrop → kort bekräftelse; 4 ger marginal utan att släppa loss loopen.
+    private const int VerkstallighetsnudgeMaxIterations = 4;
+
     private readonly IAnthropicClient _anthropic;
     private readonly HaMcpProvider _mcpProvider;
     private readonly HaToolFactory _toolFactory;
@@ -59,49 +63,31 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
         var slot = new BeslutSlot();
         var tools = _toolFactory.Build(filtered, slot, arende.Diarienummer);
 
-        var parameters = new MessageCreateParams
-        {
-            Model = AnthropicModel.ClaudeSonnet4_6,
-            MaxTokens = 4096,
-            // cache_control is a prefix marker (tools → system → messages); marking the system
-            // prompt caches the tool block too, so later loop turns read the prefix from cache.
-            System = new List<BetaTextBlockParam>
-            {
-                new() { Text = _systemPrompt, CacheControl = new BetaCacheControlEphemeral() },
-            },
-            Messages =
-            [
-                new BetaMessageParam
-                {
-                    Role = Role.User,
-                    Content = arende.BuildUserMessage(),
-                },
-            ],
-        };
-
-        var toolRunner = _anthropic.Beta.Messages.ToolRunner(parameters, tools, maxIterations: MaxIterations);
-
-        var iterations = 0;
-        await foreach (var message in toolRunner.WithCancellation(ct))
-        {
-            iterations++;
-            _logger.LogDebug(
-                "Agent turn {Iteration} for {Diarienummer}: stop_reason={StopReason}",
-                iterations, arende.Diarienummer, message.StopReason);
-
-            if (message.StopReason != BetaStopReason.ToolUse)
-            {
-                _logger.LogInformation(
-                    "Agent loop for {Diarienummer} ended after {Iterations} iteration(s); stop_reason={StopReason}", arende.Diarienummer, iterations, message.StopReason);
-            }
-        }
+        await DriveToolLoopAsync(
+            BuildParameters(arende.BuildUserMessage()), tools, MaxIterations, arende.Diarienummer, ct);
 
         if (slot.Beslut is null)
         {
             _logger.LogWarning(
-                "Agent loop for {Diarienummer} ended without a valid beslut after {Iterations} iteration(s)",
-                arende.Diarienummer, iterations);
+                "Agent loop for {Diarienummer} ended without a valid beslut",
+                arende.Diarienummer);
             return new Handlaggningsresultat(Beslut.BordlaggUtanBeslut(_clock.GetUtcNow()), null);
+        }
+
+        // Åtgärd efter bifall: ett bifall som aldrig verkställdes nudgas att verkställas i en
+        // andra, avgränsad runda. Beslutet ligger redan i slot, så guarden släpper igenom det
+        // verkställande anropet — åtgärden reser fortfarande genom Claudes tool_use (konvention #8).
+        if (BehoverVerkstallighetsnudge(slot.Beslut, slot.Verkstallighetsutfall)
+            && slot.Beslut is VerkstalltBeslut nudgeBeslut)
+        {
+            await NudgaVerkstallighetAsync(arende, device.EntityId, nudgeBeslut, tools, ct);
+
+            if (slot.Verkstallighetsutfall is null)
+            {
+                _logger.LogWarning(
+                    "Verkställighetsnudge för {Diarienummer} ledde inte till någon åtgärd; ärendet stannar i Beslutat.",
+                    arende.Diarienummer);
+            }
         }
 
         var utfall = slot.Verkstallighetsutfall;
@@ -115,4 +101,74 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
         return new Handlaggningsresultat(slot.Beslut, utfall);
     }
 
+    /// <summary>
+    /// Ett bifall/delvis bifall som medger verkställighet men där inget verkställande anrop
+    /// registrerades (utfall == null). Ett misslyckat försök (Misslyckad) nudgas inte om — Claude
+    /// har redan sett felet.
+    /// </summary>
+    public static bool BehoverVerkstallighetsnudge(Beslut? beslut, Verkstallighetsstatus? utfall) =>
+        beslut is VerkstalltBeslut && utfall is null;
+
+    // Kör en avgränsad andra runda som förelägger Claude att verkställa det redan fattade beslutet.
+    // Bästa möjliga insats: ett fel i denna runda får inte bubbla upp och förvandla ett giltigt
+    // bifall till en bordläggning (HandlaggareService fångar undantag och bordlägger).
+    private async Task NudgaVerkstallighetAsync(
+        Arende arende, string entityId, VerkstalltBeslut beslut,
+        IReadOnlyList<IBetaRunnableTool> tools, CancellationToken ct)
+    {
+        _logger.LogWarning(
+            "Bifall för {Diarienummer} saknar verkställighet; kör verkställighetsnudge.",
+            arende.Diarienummer);
+        try
+        {
+            await DriveToolLoopAsync(
+                BuildParameters(arende.BuildVerkstallighetsnudge(entityId, beslut.Verkstallighet)),
+                tools, VerkstallighetsnudgeMaxIterations, arende.Diarienummer, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Verkställighetsnudge för {Diarienummer} kunde inte genomföras; behåller beslutet oförändrat.",
+                arende.Diarienummer);
+        }
+    }
+
+    private MessageCreateParams BuildParameters(string userMessage) => new()
+    {
+        Model = AnthropicModel.ClaudeSonnet4_6,
+        MaxTokens = 4096,
+        // cache_control is a prefix marker (tools → system → messages); marking the system
+        // prompt caches the tool block too, so later loop turns read the prefix from cache.
+        System = new List<BetaTextBlockParam>
+        {
+            new() { Text = _systemPrompt, CacheControl = new BetaCacheControlEphemeral() },
+        },
+        Messages =
+        [
+            new BetaMessageParam { Role = Role.User, Content = userMessage },
+        ],
+    };
+
+    private async Task DriveToolLoopAsync(
+        MessageCreateParams parameters, IReadOnlyList<IBetaRunnableTool> tools,
+        int maxIterations, string diarienummer, CancellationToken ct)
+    {
+        var toolRunner = _anthropic.Beta.Messages.ToolRunner(parameters, tools, maxIterations: maxIterations);
+
+        var iterations = 0;
+        await foreach (var message in toolRunner.WithCancellation(ct))
+        {
+            iterations++;
+            _logger.LogDebug(
+                "Agent turn {Iteration} for {Diarienummer}: stop_reason={StopReason}",
+                iterations, diarienummer, message.StopReason);
+
+            if (message.StopReason != BetaStopReason.ToolUse)
+            {
+                _logger.LogInformation(
+                    "Agent loop for {Diarienummer} ended after {Iterations} iteration(s); stop_reason={StopReason}",
+                    diarienummer, iterations, message.StopReason);
+            }
+        }
+    }
 }
