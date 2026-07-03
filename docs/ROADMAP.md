@@ -11,9 +11,9 @@ The e-tjänst is a **core component**, not a stretch. The build order below gets
 
 | Block | Time | Status | Output |
 | --- | --- | --- | --- |
-| A | 1.0 h | ✅ Done | Solution skeleton: `Lampverket.Web/.Core/.Agent/.HomeAssistant`; domain types (`Ansokan`, `Arende`, `Beslut`, `Beslutstyp`, `Enhet`); device map in `appsettings.json` |
-| B | 1.0 h | ✅ Done (PR #1) | `Lampverket.HomeAssistant`: MCP client (C# MCP SDK) to HA's MCP Server — read state + call Assist tools. Confirm C# can turn on the hero light at a set brightness |
-| C | 1.5 h | 🔲 **Next** | `Lampverket.Agent`: Bo Sken system prompt + `Anthropic.SDK` call returning a structured `beslut` via tool-use (see `BUREAUCRACY.md`) |
+| A | 1.0 h | ✅ Done | Solution skeleton: `Lampverket.Web/.Core/.Agent`; domain types (`Ansokan`, `Arende`, `Beslut`, `Beslutstyp`, `Enhet`); device map in `appsettings.json` |
+| B | 1.0 h | ✅ Done (PR #1) | HA MCP client wired through `Lampverket.Agent` — read state + call Assist tools. Confirm C# can turn on the hero light at a set brightness. (Originally `Lampverket.HomeAssistant`; folded into the Agent project once the agentic loop replaced the typed wrapper.) |
+| C | 1.5 h | ✅ Done | `Lampverket.Agent`: Bo Sken system prompt + multi-turn agentic loop via `BetaToolRunner` returning a structured `beslut` via `lamna_beslut` (see `BUREAUCRACY.md`) |
 | D | 1.0 h | 🔲 Blocked on C | Wire the form → agent → HA → diariet end to end (Tier 1 done); also resolves ROADMAP known issues C3a/C3b/C4 |
 | E | 1.5 h | ✅ Done (PR #2) | `Lampverket.Web` UI: the maximalt-trist design system, ny-ansökan form, kvittens with diarienummer |
 | F | 0.5 h | 🔶 Partial | Edge cases & personality: fikahelgd ✅, already-on avslag / lagom cap / Jante-klausulen need agent |
@@ -24,10 +24,10 @@ Scope discipline: MCP from the start, JSONL before SQLite, one agent. BankID gag
 
 ## MVP checklist
 
-- [x] Solution builds; four projects wired
-- [x] `Lampverket.HomeAssistant` (MCP client) reads state and turns on the hero light from C#
-- [ ] Bo Sken system prompt complete and in character
-- [ ] Claude returns a schema-valid `beslut` via tool-use; C# validates it
+- [x] Solution builds; projects wired (`Web`, `Core`, `Agent`, `Agent.Tests`, `Web.Tests`, Aspire trio)
+- [x] HA MCP integration (inside `Lampverket.Agent`) reads state and can turn on the hero light from C#
+- [x] Bo Sken system prompt complete and in character
+- [x] Claude returns a schema-valid `beslut` via tool-use; C# validates it
 - [x] Form on `/ny-ansokan` produces an `Ansokan` and a `diarienummer`
 - [ ] On bifall the light actually changes
 - [ ] Every ärende appended to the diariet

@@ -1,7 +1,9 @@
 @page "/arende/{Diarienummer}"
 @rendermode InteractiveServer
-@inject IHandlaggareService Handlaggare
+@inject IAnsokanService Handlaggare
+@inject IArendeNotifier Notifier
 @using Lampverket.Core
+@implements IDisposable
 
 <h1>Ärende @Diarienummer</h1>
 
@@ -11,7 +13,7 @@
 }
 else if (_arende.Beslut is null)
 {
-    <p class="status-pill status-underhandlaggning">Under handläggning</p>
+    <p class="status-pill underhandlaggning">Under handläggning</p>
     <p>Ärendet bereds. Beslutet presenteras här när handläggningen är klar.</p>
 }
 else
@@ -22,13 +24,27 @@ Myndigheten för Hemautomation
 
 BESLUT</pre>
         <table class="beslut-meta">
-            <tr><th>Diarienummer:</th><td>@_arende.Diarienummer</td></tr>
-            <tr><th>Datum:</th><td>@_arende.Beslut.Datum.ToString("yyyy-MM-dd")</td></tr>
-            <tr><th>Handläggare:</th><td>Handläggaragent "Bo Sken"</td></tr>
-            <tr><th>Sökande:</th><td>@_arende.Ansokan.Sokande</td></tr>
+            <tr>
+                <th>Diarienummer:</th>
+                <td>@_arende.Diarienummer</td>
+            </tr>
+            <tr>
+                <th>Datum:</th>
+                <td>@_arende.Beslut.Datum.ToString("yyyy-MM-dd")</td>
+            </tr>
+            <tr>
+                <th>Handläggare:</th>
+                <td>Handläggaragent "Bo Sken"</td>
+            </tr>
+            <tr>
+                <th>Sökande:</th>
+                <td>@_arende.Ansokan.Sokande</td>
+            </tr>
         </table>
 
-        <p class="beslut-typ">@_arende.Beslut.Beslutstyp</p>
+        <p class="status-pill @_arende.Status.CssKlass()">@_arende.Status.Text()</p>
+
+        <p class="beslut-typ">@BeslutRubrik(_arende.Beslut)</p>
         <p>@_arende.Beslut.Beslutstext</p>
 
         <h3>Motivering</h3>
@@ -47,10 +63,29 @@ BESLUT</pre>
         <h3>Hur man överklagar</h3>
         <p>@_arende.Beslut.Overklagandehanvisning</p>
 
-        <h3>Verkställighet</h3>
-        <p>@_arende.Beslut.Verkstallighet</p>
+        @if (_arende.Beslut is VerkstalltBeslut verk)
+        {
+            <h3>Verkställighet</h3>
+            @switch (_arende.Verkstallighetsutfall)
+            {
+                case Verkstallighetsstatus.Misslyckad:
+                    <p>Beslutad åtgärd: @verk.Verkstallighet</p>
+                    <p class="verkstallighet-hinder">
+                        Verkställighetshinder: beslutet har fattats men åtgärden kunde inte verkställas.
+                        Ärendet kvarstår i status Beslutat i avvaktan på förnyad verkställighet.
+                    </p>
+                    break;
+                case Verkstallighetsstatus.EjPakallad:
+                    <p>@verk.Verkstallighet</p>
+                    <p>Ingen åtgärd erfordrades; den berörda enheten befann sig redan i beslutat läge.</p>
+                    break;
+                default:
+                    <p>@verk.Verkstallighet</p>
+                    break;
+            }
+        }
 
-        @if (_arende.Beslut.Beslutstyp is Beslutstyp.Avslag or Beslutstyp.Avvisning)
+        @if (_arende.Beslut is Avslag or Avvisning)
         {
             <a class="overklaga-btn" href="/ny-ansokan">Överklaga beslut</a>
         }
@@ -62,9 +97,49 @@ BESLUT</pre>
     public string Diarienummer { get; set; } = string.Empty;
 
     private Core.Arende? _arende;
+    private IDisposable? _subscription;
 
+    private static string BeslutRubrik(Beslut b) => b switch
+    {
+        Bifall => "Bifall",
+        DelvisBifall => "Delvis bifall",
+        Avslag => "Avslag",
+        Avvisning => "Avvisning",
+        Bordlaggning => "Bordläggning",
+        _ => "Beslut"
+    };
+
+    // Runs on every parameter change, so navigating between ärenden re-subscribes to the new
+    // diarienummer instead of leaking a subscription to the old one.
     protected override async Task OnParametersSetAsync()
     {
+        _subscription?.Dispose();
+        _subscription = null;
+
         _arende = await Handlaggare.HamtaArendeAsync(Diarienummer);
+
+        if (_arende?.Beslut is not null)
+        {
+            return;
+        }
+
+        _subscription = Notifier.Subscribe(Diarienummer, arende =>
+            InvokeAsync(() =>
+            {
+                _arende = arende;
+                StateHasChanged();
+            }));
+
+        // Close the race: beslut may have arrived between the initial diariet read and the subscribe.
+        var fresh = await Handlaggare.HamtaArendeAsync(Diarienummer);
+        if (fresh?.Beslut is not null)
+        {
+            _arende = fresh;
+            _subscription.Dispose();
+            _subscription = null;
+            StateHasChanged();
+        }
     }
+
+    public void Dispose() => _subscription?.Dispose();
 }

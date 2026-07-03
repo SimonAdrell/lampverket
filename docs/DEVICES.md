@@ -7,7 +7,7 @@ Lampverket governs a small, explicit allow-list of Home Assistant devices. This 
 ## Requirements
 
 - A running Home Assistant instance.
-- Home Assistant's built-in **MCP Server** integration enabled and reachable from `Lampverket.HomeAssistant` (the C# MCP SDK connects to it to read state + call Assist tools).
+- Home Assistant's built-in **MCP Server** integration enabled and reachable from `Lampverket.Agent` (the C# MCP SDK + `Anthropic.Mcp` helper connect to it to list tools and forward Claude's tool calls).
 - A long-lived access token (used by the MCP client to authenticate to Home Assistant), stored in **.NET user-secrets** (dev) or an environment variable (never committed).
 
 ## MCP integration notes
@@ -42,7 +42,7 @@ Notes:
 
 - The `state` value is quoted (`'on'`, `'off'`).
 - When the light is **off**, the `brightness:` line is still present but empty.
-- States other than `on`/`off` (`unavailable`, `unknown`, missing entirely) are treated as **not available** by `HomeAssistantClient` and yield a *bordläggning* in character.
+- States other than `on`/`off` (`unavailable`, `unknown`, missing entirely) reach Claude as the raw `GetLiveContext` payload; the system prompt instructs Claude to issue a *bordläggning*-style beslut when the entity is not on/off.
 
 ### Brightness scaling — read vs. write asymmetry
 
@@ -51,7 +51,7 @@ Notes:
 | **Read** (`GetLiveContext` → `attributes.brightness`) | 0–255 | Raw HA value. Divide by 255 then multiply by 100 to get percent. |
 | **Write** (`HassLightSet` → `brightness` arg) | 0–100 | HA's MCP Assist tool accepts percent directly. |
 
-`HomeAssistantClient.ParseLiveContextResponse` does the read-side `0-255 → 0-100` conversion so the rest of the codebase only ever sees percent.
+In the current design Claude sees the raw `GetLiveContext` YAML (0–255 brightness) and writes back percent via `HassLightSet` (0–100). The system prompt documents the asymmetry; there is no C# wrapper translating either direction.
 
 ## Example device model
 
@@ -71,7 +71,7 @@ A whimsically named device (e.g. a bedroom light called "Banan") is encouraged �
 
 ## Reading state
 
-Before deciding, `Lampverket.HomeAssistant` reads the current state of the affected device or area via the MCP live-context tool (`GetLiveContext`). This drives several personality rules:
+Before deciding, Claude calls `GetLiveContext` for the affected entity (instructed by the system prompt protocol). This is a prompt-level convention, not a C# invariant: `GetLiveContext` is exempt from the beslut guard, so nothing forces the read — the C# guard only enforces beslut-*before-action*, which is a separate rule. This drives several personality rules:
 
 - **Already on?** → *avslag* (obehövligt ärende).
 - **Unavailable?** → *bordläggning* in character.

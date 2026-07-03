@@ -30,8 +30,8 @@ else
                 <tr>
                     <td><a href="/arende/@arende.Diarienummer">@arende.Diarienummer</a></td>
                     <td>@arende.Mottaget.ToString("yyyy-MM-dd")</td>
-                    <td>@arende.Ansokan.Arendetyp</td>
-                    <td><span class="status-pill status-@arende.Status.ToString().ToLower()">@arende.Status</span></td>
+                    <td>@arende.Ansokan.Arendetyp.Text()</td>
+                    <td><span class="status-pill @arende.Status.CssKlass()">@arende.Status.Text()</span></td>
                 </tr>
             }
         </tbody>
@@ -43,6 +43,12 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        _arenden = await Diariet.HamtaAllaAsync();
+        // Diariet är append-only (flera poster per ärende); visa en rad per ärende — den senaste.
+        var alla = await Diariet.HamtaAllaAsync();
+        _arenden = alla
+            .GroupBy(a => a.Diarienummer)
+            .Select(g => g.Last())
+            .OrderByDescending(a => a.Mottaget)
+            .ToList();
     }
 }

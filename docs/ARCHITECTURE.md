@@ -15,15 +15,24 @@ A citizen files an *ansökan* through the **e-tjänst** (Blazor portal). A case-
                │ Ansokan
                ▼
    ┌───────────────────────┐
-   │  Lampverket.Agent      │  HandläggareService
-   │  "Bo Sken"             │   1. assign diarienummer
-   │  (Anthropic.SDK)       │   2. read state ──────────►  Home Assistant MCP Server (GetLiveContext)
-   └───────────┬────────────┘   3. ask Claude for a beslut (tool-use, structured)
-               │                 4. on bifall: verkställ ─►  Home Assistant MCP Server (HassTurnOn / HassLightSet …)
+   │  Lampverket.Agent      │  HandlaggareService — bureaucratic gatekeeping
+   │  (orchestrator)        │   1. assign diarienummer
+   │                        │   2. enforce fikahelgd
+   └───────────┬────────────┘   3. delegate to HandlaggareAgent
+               │
                ▼
-   ┌───────────────────────┐
-   │  Diariet (audit log)   │  append-only (JSONL → SQLite)
-   └───────────────────────┘
+   ┌───────────────────────┐       agentic loop (multi-turn tool use)
+   │  HandlaggareAgent      │   ┌──────────────────────────────────────────┐
+   │  "Bo Sken"             │◄──┤ Claude ↔ HA MCP tools + lamna_beslut     │
+   │  (Anthropic SDK + MCP) │   │  - Claude calls GetLiveContext, decides, │
+   │                        │   │    issues lamna_beslut, then acts.       │
+   └───────────┬────────────┘   │  - C# guards: beslut-before-action,      │
+               │                │    max iterations, allowed entities.     │
+               │                └──────────────────────────────────────────┘
+               ▼                            ↑
+   ┌───────────────────────┐                │ HassTurnOn / HassLightSet / …
+   │  Diariet (audit log)   │       ┌───────┴────────┐
+   └───────────────────────┘       │  HA MCP Server │
                │ beslut pushed back via SignalR
                ▼
         Ärende page shows the decision; the light changes
@@ -34,30 +43,57 @@ A citizen files an *ansökan* through the **e-tjänst** (Blazor portal). A case-
 | Project | Responsibility |
 | --- | --- |
 | **Lampverket.Web** | Blazor e-tjänst portal: forms, kvittens, Mina ärenden, the live ärende view. The "maximalt myndighetstrist" UI. See [`WEBAPP.md`](WEBAPP.md). |
-| **Lampverket.Core** | Domain model and rules: `Ansokan`, `Arende`, `Beslut`, `Beslutstyp`, `Enhet`, the legal codex, the state machine, and the `DiariumService`. No external dependencies. |
-| **Lampverket.Agent** | The `HandlaggareService` — orchestrates a case: registers it, reads state, calls Claude via `Anthropic.SDK` with the Bo Sken system prompt + tool definitions, validates the structured `beslut`. |
-| **Lampverket.HomeAssistant** | `IHomeAssistantClient` — an MCP client (C# MCP SDK) to Home Assistant's MCP Server; reads state and performs actions through its Assist tools. |
+| **Lampverket.Core** | Domain model and rules: `Ansokan`, `Arende`, `Beslut`, `Beslutstyp`, `Enhet`, the legal codex, the state machine, and the diariet contracts. No external dependencies. |
+| **Lampverket.Agent** | Two layers: (1) `HandlaggareService` — case registration, diarienummer, fikahelgd gate, diariet writes. (2) `HandlaggareAgent` — the multi-turn agentic loop. Connects to Home Assistant's MCP Server directly via `BetaMcp.ListToolsAsync` / `McpClient`. Config and the readiness `HomeAssistantHealthCheck` live in the `HomeAssistant/` sub-folder of this project. |
 
 ## Components
 
 ### Handläggaragent ("Bo Sken")
 
-Lives in `Lampverket.Agent`. The **system prompt** encodes four things:
+Lives in `Lampverket.Agent`. The **system prompt** encodes:
 
 1. The **persona** — a deadpan Swedish civil servant (see [`BUREAUCRACY.md`](BUREAUCRACY.md#tone-guide)).
 2. The **legal codex** — the fictional statutes it cites.
-3. The **beslut template** — the exact decision format it must emit.
+3. The **beslut template** — the exact decision format it must emit via `lamna_beslut`.
 4. The **state machine** — the lifecycle every ärende follows.
+5. The **tool protocol** — call `GetLiveContext` first; call `lamna_beslut` before any action tool; allowed entity IDs.
 
-Claude returns a **structured beslut via tool-use** (a `lamna_beslut` tool whose schema mirrors the `Beslut` type), which C# deserializes and validates. One agent is enough for the weekend build; an optional later split adds a *registrator* (intake + diarienummer) handing off to a *handläggare* (decision), mirroring a real authority.
+#### Agentic loop (the design choice)
 
-**Division of labour:** Claude *decides*; C# *executes*. Claude never calls Home Assistant directly — it returns a decision, and `HandlaggareService` performs the action only on *bifall*/*delvis bifall*. This keeps the side effects in deterministic, testable C#.
+The agent runs a **multi-turn tool-use loop** rather than a single forced-tool-use call. Each turn:
 
-### Home Assistant (Lampverket.HomeAssistant)
+1. Send the conversation + the merged tool list (HA MCP tools + `lamna_beslut`) to Claude.
+2. If Claude emits one or more `tool_use` blocks, execute them (MCP for HA tools, decision capture for `lamna_beslut`) and feed the results back as the next user turn.
+3. Repeat until Claude responds without a tool call, or a hard limit is hit.
 
-- **Read:** current device/area state, to drive the personality rules (already-on, brightness, availability) — via `GetLiveContext`.
+This is the classic agent pattern (Anthropic's "Building Effective Agents"): the LLM controls the flow; the host provides tools, executes them, and feeds back results.
+
+**Why this over a single forced-tool call?**
+
+- The LLM, not C#, decides when to read state, when to issue the decision, and which action follows. That is what makes this an *agent* rather than a workflow.
+- Real HA tool schemas (`GetLiveContext`, `HassTurnOn`, `HassLightSet`, …) are passed through unmodified — the demo shows MCP integration end-to-end.
+- The cost of multi-turn (more tokens, latency) is bounded by `MaxIterations` and mitigated with prompt caching of the system prompt.
+
+#### Hybrid guardrails (what stays in C#)
+
+Agent autonomy is layered with deterministic guards. The agent loop enforces them before any HA tool reaches MCP:
+
+| Layer | Owner | Enforcement |
+| --- | --- | --- |
+| Decision flow | Claude | Tool choices, ordering, when to stop |
+| **Beslut before action** | C# guard (`HaToolFactory.GuardHaTool`) | If a HA action tool is called before `lamna_beslut`, return an error tool-result (a normal, non-`is_error` result) instructing Claude to issue a beslut first |
+| **Max iterations** | C# guard | Hard cap on loop turns; log and bordlägg on exhaustion |
+| Allowed entities | System prompt + config | Entity IDs listed in the prompt come from `HomeAssistantOptions.Devices` |
+| Audit | `HandlaggareService` + diariet | Every ärende append-logged at intake and after the agent returns |
+| Prompt cost | `cache_control: ephemeral` | The `lamna_beslut` tool definition is marked ephemeral today. Caching the system prompt and the HA tool list across loop turns is planned but not yet wired (tracked as an issue). |
+
+**Division of labour:** Claude *decides and orchestrates*; C# *enforces invariants, executes side effects, and audits*. The HA MCP call is still a real side effect — it just travels through Claude's `tool_use`, not through a `HandlaggareService.VerkstallAsync` switch statement.
+
+### Home Assistant integration (inside Lampverket.Agent)
+
+- **Read:** current device/area state — via `GetLiveContext`.
 - **Act:** turn on/off, set brightness, set volume, play media — via `HassTurnOn` / `HassTurnOff` / `HassLightSet` / `HassSetVolume` / `HassMediaSearchAndPlay`.
-- Implemented with the official **C# MCP SDK** (`ModelContextProtocol`): `Lampverket.HomeAssistant` is an MCP *client* that connects to Home Assistant's built-in **MCP Server** integration and calls its Assist tools. The decision is Claude's; this client only carries out an already-issued *beslut*. See [`DEVICES.md`](DEVICES.md).
+- Implemented with the official **C# MCP SDK** (`ModelContextProtocol`) plus the Anthropic SDK's `Anthropic.Mcp` helper. `HandlaggareAgent` holds an `McpClient` connected to Home Assistant's built-in **MCP Server**. At first ärende it calls `BetaMcp.ListToolsAsync(mcpClient)` once — the resulting `IBetaRunnableTool[]` is reused for every loop. Tool calls flow through `BetaToolRunner`, wrapped by a guard delegate (`HaToolFactory.GuardHaTool`) that enforces beslut-before-action. The `HomeAssistant/` sub-folder of the Agent project holds the bound `HomeAssistantOptions`, `DeviceMapEntry` configuration record, and `HomeAssistantHealthCheck`. See [`DEVICES.md`](DEVICES.md).
 
 ### Diariet (Lampverket.Core)
 
@@ -86,22 +122,24 @@ The log is **append-only by rule** — corrections are issued as new ärenden (a
 | # | State | Swedish | What happens |
 | - | --- | --- | --- |
 | 1 | Received | *Inkommet* | Application logged, `diarienummer` assigned |
-| 2 | Under review | *Under handläggning* | Agent reads current device state |
-| 3 | Decision | *Beslut* | bifall / delvis bifall / avslag / avvisning, with a `motivering` |
-| 4 | Executed | *Verkställt* | On bifall, the action is performed via Home Assistant |
-| 5 | (optional) Appeal | *Överklagande* | The applicant contests; the agent re-decides |
+| 2 | Decided | *Beslutat* | bifall / delvis bifall / avslag / avvisning issued, with a `motivering`. A bifall stays here if execution fails |
+| 3 | Executed | *Verkställt* | On bifall/delvis bifall, the HA action was confirmed (or was unneeded — device already in the desired state) |
+| 4 | Tabled | *Bordlagt* | Unknown device, processing error, or no valid beslut |
 
-Decision types are specified in [`BUREAUCRACY.md`](BUREAUCRACY.md#decision-types).
+"Under handläggning" is not a stored state — it is derived: an ärende with no `Beslut` yet is shown as under review. Decision types are specified in [`BUREAUCRACY.md`](BUREAUCRACY.md#decision-types).
 
 ## Request flow (one ärende)
 
 1. **Intake.** Citizen submits the form; `Lampverket.Web` builds an `Ansokan` and calls `HandlaggareService`.
 2. **Register.** Assign `diarienummer`; write the `Inkommet` record; redirect the user to the kvittens.
-3. **Review.** Read the affected device/area state; evaluate codex + personality rules (fikahelgd, lagom caps, neighbour-volume, already-on).
-4. **Decide.** Call Claude; receive a structured `beslut`; validate it against `Lampverket.Core`.
-5. **Execute.** On bifall/delvis bifall, call Home Assistant. If unavailable, *bordlägg* in character.
-6. **Log.** Append the final record (with verkställighet timestamp) to the diariet.
-7. **Notify.** Push the `beslut` to the ärende page via SignalR; the light changes in the room.
+3. **Fikahelgd gate.** If it is Friday 14:xx in Stockholm, short-circuit with an auto-avslag — `HandlaggareAgent` is not invoked.
+4. **Agent loop.** `HandlaggareAgent.HandlaggaAsync(arende)` runs the multi-turn loop:
+   - Claude inspects state via `GetLiveContext`.
+   - Claude issues a `lamna_beslut` (capturing the structured decision into a `Beslut`).
+   - On bifall/delvis bifall, Claude calls the appropriate HA action tool; on avslag/avvisning, the loop ends.
+   - The C# guard rejects any HA action emitted before `lamna_beslut`.
+5. **Log — two phases.** Append the *beslutsfas* record (`Beslutat`/`Bordlagt`), then, if the beslut allows execution, append the *verkställighetsfas* record whose status C# reconciles from the observed HA outcome (`Verkstallighetsregler`): `Verkställt` on a confirmed (or unneeded) action, back to `Beslutat` if the action failed. `Verkställt` is never inferred from the decision type alone.
+6. **Notify.** An in-process `IArendeNotifier` pushes the finished ärende to the open page over its existing Blazor circuit; the light changes in the room.
 
 ## Tech stack and rationale
 
@@ -116,7 +154,9 @@ Decision types are specified in [`BUREAUCRACY.md`](BUREAUCRACY.md#decision-types
 
 ## Error handling
 
-- **Unavailable device** → `bordläggs` in character; logged, not crashed.
+- **Unavailable device** → Claude sees the failure tool-result and issues a *bordläggs*-style beslut; logged, not crashed.
 - **Ambiguous request** → *avvisning* asking the applicant to complete the application.
-- **Claude returns an invalid/owrong-shaped beslut** → validation fails in C#; retry once with the schema reinforced, then *bordlägg* with a *handläggningsfel* note.
-- **Home Assistant call fails** → the beslut stands; the diariet records `verkstalld: false` with a *verkställighetshinder*; the page reports it deadpan.
+- **Claude calls a HA action before `lamna_beslut`** → the C# guard (`HaToolFactory.GuardHaTool`) returns an error tool-result instructing Claude to issue a beslut first; the call never reaches HA. There is no dedicated violation counter — the only bound on repeated attempts is `MaxIterations`.
+- **Claude returns an invalid/wrong-shaped beslut** → JSON deserialisation logs a warning; loop continues so Claude can correct on the next turn. If no valid beslut by `MaxIterations`, *bordlägg* with a *handläggningsfel* note.
+- **MaxIterations reached** → loop exits with a *handläggningsfel* bordläggning; the unfinished trail is preserved in the diariet for debugging.
+- **Home Assistant call fails** → the MCP `is_error` reaches Claude as a tool result; Claude amends the beslut's `verkstallighet` field accordingly; the diariet records the final state.
