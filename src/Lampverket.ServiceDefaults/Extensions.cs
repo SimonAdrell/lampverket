@@ -61,6 +61,8 @@ public static class Extensions
             .WithTracing(tracing =>
             {
                 tracing.AddSource(builder.Environment.ApplicationName)
+                    // Handläggarens egen källa: spann + steg-events för agentloopen (se AgentDiagnostics).
+                    .AddSource("Lampverket.Agent")
                     .AddAspNetCoreInstrumentation(tracing =>
                         // Exclude health check requests from tracing
                         tracing.Filter = context =>

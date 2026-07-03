@@ -13,7 +13,7 @@
 }
 else if (_arende.Beslut is null)
 {
-    <p class="status-pill underhandlaggning">Under handläggning</p>
+    <p class="status-pill underhandlaggning">@(_steg ?? "Under handläggning")</p>
     <p>Ärendet bereds. Beslutet presenteras här när handläggningen är klar.</p>
 }
 else
@@ -102,7 +102,9 @@ BESLUT</pre>
     public string Diarienummer { get; set; } = string.Empty;
 
     private Core.Arende? _arende;
+    private string? _steg;
     private IDisposable? _subscription;
+    private IDisposable? _stegSubscription;
 
     private static string BeslutRubrik(Beslut b) => b switch
     {
@@ -120,6 +122,9 @@ BESLUT</pre>
     {
         _subscription?.Dispose();
         _subscription = null;
+        _stegSubscription?.Dispose();
+        _stegSubscription = null;
+        _steg = null;
 
         _arende = await Handlaggare.HamtaArendeAsync(Diarienummer);
 
@@ -135,6 +140,14 @@ BESLUT</pre>
                 StateHasChanged();
             }));
 
+        // Live handläggningssteg (t.ex. "Granskar hemförhållanden") medan beslutet ännu inte fattats.
+        _stegSubscription = Notifier.SubscribeSteg(Diarienummer, steg =>
+            InvokeAsync(() =>
+            {
+                _steg = steg;
+                StateHasChanged();
+            }));
+
         // Close the race: beslut may have arrived between the initial diariet read and the subscribe.
         var fresh = await Handlaggare.HamtaArendeAsync(Diarienummer);
         if (fresh?.Beslut is not null)
@@ -142,9 +155,15 @@ BESLUT</pre>
             _arende = fresh;
             _subscription.Dispose();
             _subscription = null;
+            _stegSubscription.Dispose();
+            _stegSubscription = null;
             StateHasChanged();
         }
     }
 
-    public void Dispose() => _subscription?.Dispose();
+    public void Dispose()
+    {
+        _subscription?.Dispose();
+        _stegSubscription?.Dispose();
+    }
 }
