@@ -4,5 +4,6 @@ namespace Lampverket.Agent;
 
 public interface IHandlaggareAgent
 {
-    Task<Handlaggningsresultat> HandlaggaAsync(Arende arende, CancellationToken ct = default);
+    Task<Handlaggningsresultat> HandlaggaAsync(
+        Arende arende, IProgress<Handlaggningshandelse>? progress = null, CancellationToken ct = default);
 }

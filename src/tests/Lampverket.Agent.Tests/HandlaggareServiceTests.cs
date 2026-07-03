@@ -265,6 +265,37 @@ public class HandlaggareServiceTests
         Assert.IsType<Bordlaggning>(notifier.Calls[0].Arende.Beslut);
     }
 
+    [Fact]
+    public async Task ProcessArendeAsync_AgentReportsBeslutMidLoop_NotifiesInterimWithoutExtraDiarietRow()
+    {
+        var notifier = new FakeArendeNotifier();
+        var now = new DateTimeOffset(2026, 5, 15, 10, 0, 0, TimeSpan.Zero);
+        var beslut = TestBifall();
+        // Agenten rapporterar ett steg och sedan det fattade beslutet mitt i loopen, före verkställighet.
+        var fakeAgent = new ReportingHandlaggareAgent(beslut, Verkstallighetsstatus.Verkstalld,
+            Handlaggningshandelse.ForSteg("Granskar hemförhållanden"),
+            Handlaggningshandelse.ForBeslut(beslut));
+        var diariet = new FakeDiariet();
+        var sut = MakeSut(new FakeTimeProvider(now), diariet: diariet, agent: fakeAgent, notifier: notifier);
+
+        var arende = await sut.RegisterAnsokanAsync(TestAnsokan("Banan", Arendetyp.Tanding));
+        await sut.ProcessArendeAsync(arende.Diarienummer);
+
+        // Steget nådde sidan.
+        Assert.Contains("Granskar hemförhållanden", notifier.Steg);
+
+        // Beslutet visades direkt (interim, Beslutat) och sedan slutstatus (Verkställt) — två notiser.
+        Assert.Equal(2, notifier.Calls.Count);
+        Assert.Equal(Arendestatus.Beslutat, notifier.Calls[0].Arende.Status);
+        Assert.Same(beslut, notifier.Calls[0].Arende.Beslut);
+        Assert.Equal(Arendestatus.Verkstallt, notifier.Calls[1].Arende.Status);
+
+        // Interim-notisen får inte skriva till diariet: audit-loggen förblir Inkommet → Beslutat → Verkställt.
+        Assert.Equal(
+            [Arendestatus.Inkommet, Arendestatus.Beslutat, Arendestatus.Verkstallt],
+            diariet.Log.Select(a => a.Status));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static HandlaggareService MakeSut(
@@ -346,7 +377,8 @@ file sealed class FakeHandlaggareAgent : IHandlaggareAgent
         _beslut = b;
         _utfall = utfall;
     }
-    public Task<Handlaggningsresultat> HandlaggaAsync(Arende arende, CancellationToken ct = default)
+    public Task<Handlaggningsresultat> HandlaggaAsync(
+        Arende arende, IProgress<Handlaggningshandelse>? progress = null, CancellationToken ct = default)
     {
         CallCount++;
         return Task.FromResult(new Handlaggningsresultat(_beslut!, _utfall));
@@ -355,13 +387,31 @@ file sealed class FakeHandlaggareAgent : IHandlaggareAgent
 
 file sealed class ThrowingHandlaggareAgent(Exception ex) : IHandlaggareAgent
 {
-    public Task<Handlaggningsresultat> HandlaggaAsync(Arende arende, CancellationToken ct = default) => throw ex;
+    public Task<Handlaggningsresultat> HandlaggaAsync(
+        Arende arende, IProgress<Handlaggningshandelse>? progress = null, CancellationToken ct = default) => throw ex;
+}
+
+// Rapporterar givna händelser via IProgress (som den riktiga agenten gör mitt i loopen) innan resultatet returneras.
+file sealed class ReportingHandlaggareAgent(
+    Beslut beslut, Verkstallighetsstatus? utfall, params Handlaggningshandelse[] handelser) : IHandlaggareAgent
+{
+    public Task<Handlaggningsresultat> HandlaggaAsync(
+        Arende arende, IProgress<Handlaggningshandelse>? progress = null, CancellationToken ct = default)
+    {
+        foreach (var handelse in handelser)
+        {
+            progress?.Report(handelse);
+        }
+        return Task.FromResult(new Handlaggningsresultat(beslut, utfall));
+    }
 }
 
 file sealed class NullArendeNotifier : IArendeNotifier
 {
     public Task NotifyAsync(string diarienummer, Arende arende) => Task.CompletedTask;
     public IDisposable Subscribe(string diarienummer, Func<Arende, Task> handler) => new NoopDisposable();
+    public Task NotifyStegAsync(string diarienummer, string steg) => Task.CompletedTask;
+    public IDisposable SubscribeSteg(string diarienummer, Func<string, Task> handler) => new NoopDisposable();
 
     private sealed class NoopDisposable : IDisposable { public void Dispose() { } }
 }
@@ -370,12 +420,19 @@ file sealed class FakeArendeNotifier : IArendeNotifier
 {
     public record Call(string Diarienummer, Arende Arende);
     public List<Call> Calls { get; } = [];
+    public List<string> Steg { get; } = [];
     public Task NotifyAsync(string diarienummer, Arende arende)
     {
         Calls.Add(new(diarienummer, arende));
         return Task.CompletedTask;
     }
     public IDisposable Subscribe(string diarienummer, Func<Arende, Task> handler) => new NoopDisposable();
+    public Task NotifyStegAsync(string diarienummer, string steg)
+    {
+        Steg.Add(steg);
+        return Task.CompletedTask;
+    }
+    public IDisposable SubscribeSteg(string diarienummer, Func<string, Task> handler) => new NoopDisposable();
 
     private sealed class NoopDisposable : IDisposable { public void Dispose() { } }
 }

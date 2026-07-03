@@ -12,6 +12,7 @@ public sealed class ArendeNotifier : IArendeNotifier
     // the same ärende must update in several tabs at once. Dispose is identity-safe (below) so a
     // closing page never evicts a newer page's handler.
     private readonly ConcurrentDictionary<string, Func<Arende, Task>> _subscribers = new();
+    private readonly ConcurrentDictionary<string, Func<string, Task>> _stegSubscribers = new();
 
     public Task NotifyAsync(string diarienummer, Arende arende) =>
         _subscribers.TryGetValue(diarienummer, out var handler) ? handler(arende) : Task.CompletedTask;
@@ -23,6 +24,16 @@ public sealed class ArendeNotifier : IArendeNotifier
         // diarienummer must not be torn down when an earlier page disposes.
         return new Subscription(() =>
             _subscribers.TryRemove(new KeyValuePair<string, Func<Arende, Task>>(diarienummer, handler)));
+    }
+
+    public Task NotifyStegAsync(string diarienummer, string steg) =>
+        _stegSubscribers.TryGetValue(diarienummer, out var handler) ? handler(steg) : Task.CompletedTask;
+
+    public IDisposable SubscribeSteg(string diarienummer, Func<string, Task> handler)
+    {
+        _stegSubscribers[diarienummer] = handler;
+        return new Subscription(() =>
+            _stegSubscribers.TryRemove(new KeyValuePair<string, Func<string, Task>>(diarienummer, handler)));
     }
 
     private sealed class Subscription(Action dispose) : IDisposable

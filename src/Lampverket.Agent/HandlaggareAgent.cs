@@ -47,7 +47,8 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
         _clock = clock;
     }
 
-    public async Task<Handlaggningsresultat> HandlaggaAsync(Arende arende, CancellationToken ct = default)
+    public async Task<Handlaggningsresultat> HandlaggaAsync(
+        Arende arende, IProgress<Handlaggningshandelse>? progress = null, CancellationToken ct = default)
     {
         var haTools = await _mcpProvider.GetToolsAsync(ct);
         var device = _haOptions.Devices
@@ -61,7 +62,11 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
 
         var filtered = HaToolFilter.ForEntity(haTools, device.EntityId);
         var slot = new BeslutSlot();
-        var tools = _toolFactory.Build(filtered, slot, arende.Diarienummer);
+        var tools = _toolFactory.Build(filtered, slot, arende.Diarienummer, progress);
+
+        // Beredningen börjar: nudga sidan bort från den statiska väntetexten. Claude anropar
+        // GetLiveContext härnäst för att granska enhetens tillstånd före beslut (konvention #6).
+        progress?.Report(Handlaggningshandelse.ForSteg("Granskar hemförhållanden"));
 
         await DriveToolLoopAsync(
             BuildParameters(arende.BuildUserMessage()), tools, MaxIterations, arende.Diarienummer, ct);

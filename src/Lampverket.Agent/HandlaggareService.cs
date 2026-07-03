@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading.Channels;
 using Lampverket.Core;
 using Microsoft.Extensions.Logging;
@@ -7,7 +8,7 @@ namespace Lampverket.Agent;
 public sealed class HandlaggareService(IDiariet diariet, IHandlaggareAgent agent, TimeProvider clock,
     IArendeNotifier notifier, ChannelWriter<string> queue, ILogger<HandlaggareService> logger) : IAnsokanService, IArendeProcessor
 {
-    private static readonly TimeOnly FikaStart = new(14, 0);
+    private static readonly TimeOnly FikaStart = new(14, 30);
     private static readonly TimeOnly FikaSlut = new(15, 0);
 
     private static readonly TimeZoneInfo _stockholmTz =
@@ -42,6 +43,11 @@ public sealed class HandlaggareService(IDiariet diariet, IHandlaggareAgent agent
             return;
         }
 
+        // Omslutande spann: nästlar Anthropic-anropen till en enda trace och bär steg-events (via
+        // Rapportera) så beslutet syns ~8 s före loopens slut direkt i Aspire.
+        using var activity = AgentDiagnostics.Source.StartActivity("handläggning");
+        activity?.SetTag("diarienummer", diarienummer);
+
         Arende final;
         try
         {
@@ -68,6 +74,9 @@ public sealed class HandlaggareService(IDiariet diariet, IHandlaggareAgent agent
             }
         }
 
+        activity?.SetTag("slutstatus", final.Status.ToString());
+        activity?.AddEvent(new ActivityEvent("Handläggning avslutad"));
+
         await _notifier.NotifyAsync(diarienummer, final);
     }
 
@@ -83,9 +92,13 @@ public sealed class HandlaggareService(IDiariet diariet, IHandlaggareAgent agent
                 now), null);
         }
 
+        // Synkron IProgress: Progress<T> skulle marshalla callbacken till trådpoolen (ingen
+        // SynchronizationContext här), vilket gör ordningen mellan steg/beslut icke-deterministisk.
+        var progress = new DirektProgress<Handlaggningshandelse>(handelse => Rapportera(arende, handelse));
+
         try
         {
-            return await _agent.HandlaggaAsync(arende, ct);
+            return await _agent.HandlaggaAsync(arende, progress, ct);
         }
         catch (OperationCanceledException)
         {
@@ -96,6 +109,29 @@ public sealed class HandlaggareService(IDiariet diariet, IHandlaggareAgent agent
             _logger.LogError(ex, "Handläggningsfel för {Diarienummer}.", arende.Diarienummer);
             return new Handlaggningsresultat(Beslut.BordlaggHandlaggningsfel(now), null);
         }
+    }
+
+    // Mellanliggande uppdateringar från agentloopen → sidan, utan att röra diariet (audit-loggen skrivs
+    // först i FinaliseAsync). Fire-and-forget: notifieringen driver bara sidans render över dess circuit.
+    private void Rapportera(Arende arende, Handlaggningshandelse handelse)
+    {
+        if (handelse.Beslut is { } beslut)
+        {
+            Activity.Current?.AddEvent(new ActivityEvent("Beslut fattat",
+                tags: new ActivityTagsCollection { { "beslutstyp", beslut.GetType().Name } }));
+            var interim = arende with { Status = beslut.ResulterandeStatus, Beslut = beslut };
+            _ = _notifier.NotifyAsync(arende.Diarienummer, interim);
+        }
+        else if (handelse.Steg is { } steg)
+        {
+            Activity.Current?.AddEvent(new ActivityEvent(steg));
+            _ = _notifier.NotifyStegAsync(arende.Diarienummer, steg);
+        }
+    }
+
+    private sealed class DirektProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 
 

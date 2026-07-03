@@ -16,16 +16,19 @@ public sealed class HaToolFactory(TimeProvider clock, ILogger<HaToolFactory> log
     public IReadOnlyList<IBetaRunnableTool> Build(
         IReadOnlyList<IBetaRunnableTool> haTools,
         BeslutSlot slot,
-        string diarienummer)
+        string diarienummer,
+        IProgress<Handlaggningshandelse>? progress = null)
     {
         var tools = new List<IBetaRunnableTool>(haTools.Count + 1);
         foreach (var haTool in haTools)
-            tools.Add(GuardHaTool(haTool, slot, diarienummer));
-        tools.Add(BuildBeslutTool(slot, diarienummer));
+            tools.Add(GuardHaTool(haTool, slot, diarienummer, progress));
+        tools.Add(BuildBeslutTool(slot, diarienummer, progress));
         return tools;
     }
 
-    private BetaRunnableTool GuardHaTool(IBetaRunnableTool inner, BeslutSlot slot, string diarienummer) =>
+    private BetaRunnableTool GuardHaTool(
+        IBetaRunnableTool inner, BeslutSlot slot, string diarienummer,
+        IProgress<Handlaggningshandelse>? progress) =>
         new()
         {
             Name = inner.Name,
@@ -44,6 +47,9 @@ public sealed class HaToolFactory(TimeProvider clock, ILogger<HaToolFactory> log
                     {
                         return DecisionForbidsError(toolUse.Name, beslut);
                     }
+
+                    // Beslutet är fattat och medger verkställighet; åtgärden är på väg att utföras.
+                    progress?.Report(Handlaggningshandelse.ForSteg("Verkställer"));
                 }
 
                 return await ExecuteHaToolAsync(inner, toolUse, slot, arVerkstallande, diarienummer, ct);
@@ -115,7 +121,8 @@ public sealed class HaToolFactory(TimeProvider clock, ILogger<HaToolFactory> log
         }
     }
 
-    private BetaRunnableTool BuildBeslutTool(BeslutSlot slot, string diarienummer) =>
+    private BetaRunnableTool BuildBeslutTool(
+        BeslutSlot slot, string diarienummer, IProgress<Handlaggningshandelse>? progress) =>
         new()
         {
             Name = BeslutToolName,
@@ -142,6 +149,10 @@ public sealed class HaToolFactory(TimeProvider clock, ILogger<HaToolFactory> log
                         "Ett beslut har redan utfärdats för detta ärende. " +
                         "Ytterligare beslut kan inte registreras.");
                 }
+
+                // Beslutet är fattat mitt i loopen (~8 s före loopens slut). Rapportera det direkt så
+                // sidan visar beslutet medan eventuell verkställighet fortfarande pågår.
+                progress?.Report(Handlaggningshandelse.ForBeslut(beslut));
 
                 return Task.FromResult<BetaToolResultBlockParamContent>(
                     $"Beslutet är registrerat i diariet. Beslutstyp: {beslut.GetType().Name}. " +
