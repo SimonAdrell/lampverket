@@ -85,7 +85,7 @@ Agent autonomy is layered with deterministic guards. The agent loop enforces the
 | **Max iterations** | C# guard | Hard cap on loop turns; log and bordlägg on exhaustion |
 | Allowed entities | System prompt + config | Entity IDs listed in the prompt come from `HomeAssistantOptions.Devices` |
 | Audit | `HandlaggareService` + diariet | Every ärende append-logged at intake and after the agent returns |
-| Prompt cost | `cache_control: ephemeral` | The `lamna_beslut` tool definition is marked ephemeral today. Caching the system prompt and the HA tool list across loop turns is planned but not yet wired (tracked as an issue). |
+| Prompt cost | `cache_control: ephemeral` | A single ephemeral mark on the system prompt caches the whole prefix. `cache_control` is a prefix marker (order: tools → system → messages) that caches everything up to and including the marked block, so marking the system prompt caches the tool block plus the system prompt in one breakpoint. Loop turns after the first read it from cache. |
 
 **Division of labour:** Claude *decides and orchestrates*; C# *enforces invariants, executes side effects, and audits*. The HA MCP call is still a real side effect — it just travels through Claude's `tool_use`, not through a `HandlaggareService.VerkstallAsync` switch statement.
 

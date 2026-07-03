@@ -124,7 +124,7 @@ public sealed class HaToolFactory(TimeProvider clock, ILogger<HaToolFactory> log
                 Name = BeslutToolName,
                 Description = "Utfärda ett formellt beslut på ansökan. MÅSTE anropas före varje verkställande HA-anrop.",
                 InputSchema = BeslutsSchema.Build(),
-                CacheControl = new BetaCacheControlEphemeral(),
+                // No cache_control: cached via the system-prompt prefix; no separate breakpoint needed.
             }),
             Run = (toolUse, _) =>
             {

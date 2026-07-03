@@ -63,7 +63,12 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
         {
             Model = AnthropicModel.ClaudeSonnet4_6,
             MaxTokens = 4096,
-            System = _systemPrompt,
+            // cache_control is a prefix marker (tools → system → messages); marking the system
+            // prompt caches the tool block too, so later loop turns read the prefix from cache.
+            System = new List<BetaTextBlockParam>
+            {
+                new() { Text = _systemPrompt, CacheControl = new BetaCacheControlEphemeral() },
+            },
             Messages =
             [
                 new BetaMessageParam
