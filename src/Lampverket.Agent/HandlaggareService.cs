@@ -8,7 +8,7 @@ namespace Lampverket.Agent;
 public sealed class HandlaggareService(IDiariet diariet, IHandlaggareAgent agent, TimeProvider clock,
     IArendeNotifier notifier, ChannelWriter<string> queue, ILogger<HandlaggareService> logger) : IAnsokanService, IArendeProcessor
 {
-    private static readonly TimeOnly FikaStart = new(14, 30);
+    private static readonly TimeOnly FikaStart = new(14, 0);
     private static readonly TimeOnly FikaSlut = new(15, 0);
 
     private static readonly TimeZoneInfo _stockholmTz =
