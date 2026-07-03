@@ -22,11 +22,12 @@ public class VerkstallighetsreglerTests
     }
 
     [Fact]
-    public void Bifall_IngetForsok_GerVerkstalltEjPakallad()
+    public void Bifall_IngetForsok_StannarBeslutat()
     {
+        // Inget verkställande anrop gjordes → ärendet får aldrig påstås vara Verkställt.
         var (status, utfall) = Verkstallighetsregler.Avgor(Bifall(), null);
-        Assert.Equal(Arendestatus.Verkstallt, status);
-        Assert.Equal(Verkstallighetsstatus.EjPakallad, utfall);
+        Assert.Equal(Arendestatus.Beslutat, status);
+        Assert.Null(utfall);
     }
 
     [Fact]

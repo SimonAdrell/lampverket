@@ -123,7 +123,7 @@ The log is **append-only by rule** — corrections are issued as new ärenden (a
 | - | --- | --- | --- |
 | 1 | Received | *Inkommet* | Application logged, `diarienummer` assigned |
 | 2 | Decided | *Beslutat* | bifall / delvis bifall / avslag / avvisning issued, with a `motivering`. A bifall stays here if execution fails |
-| 3 | Executed | *Verkställt* | On bifall/delvis bifall, the HA action was confirmed (or was unneeded — device already in the desired state) |
+| 3 | Executed | *Verkställt* | On bifall/delvis bifall, the HA action was confirmed. Only a confirmed action reaches this state — a bifall with no confirmed action stays *Beslutat* (a device already in the desired state is an *avslag*, not a bifall) |
 | 4 | Tabled | *Bordlagt* | Unknown device, processing error, or no valid beslut |
 
 "Under handläggning" is not a stored state — it is derived: an ärende with no `Beslut` yet is shown as under review. Decision types are specified in [`BUREAUCRACY.md`](BUREAUCRACY.md#decision-types).
@@ -138,7 +138,7 @@ The log is **append-only by rule** — corrections are issued as new ärenden (a
    - Claude issues a `lamna_beslut` (capturing the structured decision into a `Beslut`).
    - On bifall/delvis bifall, Claude calls the appropriate HA action tool; on avslag/avvisning, the loop ends.
    - The C# guard rejects any HA action emitted before `lamna_beslut`.
-5. **Log — two phases.** Append the *beslutsfas* record (`Beslutat`/`Bordlagt`), then, if the beslut allows execution, append the *verkställighetsfas* record whose status C# reconciles from the observed HA outcome (`Verkstallighetsregler`): `Verkställt` on a confirmed (or unneeded) action, back to `Beslutat` if the action failed. `Verkställt` is never inferred from the decision type alone.
+5. **Log — two phases.** Append the *beslutsfas* record (`Beslutat`/`Bordlagt`), then, if the beslut allows execution, append the *verkställighetsfas* record whose status C# reconciles from the observed HA outcome (`Verkstallighetsregler`): `Verkställt` only on a confirmed action, otherwise `Beslutat` (the action failed, or no action was confirmed). `Verkställt` is never inferred from the decision type alone.
 6. **Notify.** An in-process `IArendeNotifier` pushes the finished ärende to the open page over its existing Blazor circuit; the light changes in the room.
 
 ## Tech stack and rationale

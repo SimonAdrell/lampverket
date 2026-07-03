@@ -94,7 +94,7 @@ public class HandlaggareServiceTests
     {
         var now = new DateTimeOffset(2026, 5, 15, 10, 0, 0, TimeSpan.Zero);
         var fakeAgent = new FakeHandlaggareAgent();
-        fakeAgent.Returns(TestBifall());
+        fakeAgent.Returns(TestBifall(), Verkstallighetsstatus.Verkstalld);
         var diariet = new FakeDiariet();
         var sut = MakeSut(new FakeTimeProvider(now), diariet: diariet, agent: fakeAgent);
 
@@ -162,7 +162,7 @@ public class HandlaggareServiceTests
         var notifier = new FakeArendeNotifier();
         var now = new DateTimeOffset(2026, 5, 15, 10, 0, 0, TimeSpan.Zero);
         var fakeAgent = new FakeHandlaggareAgent();
-        fakeAgent.Returns(TestBifall());
+        fakeAgent.Returns(TestBifall(), Verkstallighetsstatus.Verkstalld);
         var diariet = new FakeDiariet();
         var sut = MakeSut(new FakeTimeProvider(now), diariet: diariet, agent: fakeAgent, notifier: notifier);
 
@@ -194,11 +194,11 @@ public class HandlaggareServiceTests
     }
 
     [Fact]
-    public async Task ProcessArendeAsync_BifallWithNoAction_StaysVerkstalltEjPakallad()
+    public async Task ProcessArendeAsync_BifallWithNoAction_StaysBeslutat()
     {
         var now = new DateTimeOffset(2026, 5, 15, 10, 0, 0, TimeSpan.Zero);
         var fakeAgent = new FakeHandlaggareAgent();
-        fakeAgent.Returns(TestBifall(), utfall: null); // enheten redan i önskat läge → inget anrop
+        fakeAgent.Returns(TestBifall(), utfall: null); // beslut men inget verkställande anrop
         var diariet = new FakeDiariet();
         var sut = MakeSut(new FakeTimeProvider(now), diariet: diariet, agent: fakeAgent);
 
@@ -206,8 +206,9 @@ public class HandlaggareServiceTests
         await sut.ProcessArendeAsync(arende.Diarienummer);
         var final = await sut.HamtaArendeAsync(arende.Diarienummer);
 
-        Assert.Equal(Arendestatus.Verkstallt, final!.Status);
-        Assert.Equal(Verkstallighetsstatus.EjPakallad, final.Verkstallighetsutfall);
+        // Ingen bekräftad åtgärd → ärendet får inte påstås vara Verkställt.
+        Assert.Equal(Arendestatus.Beslutat, final!.Status);
+        Assert.Null(final.Verkstallighetsutfall);
     }
 
     [Fact]

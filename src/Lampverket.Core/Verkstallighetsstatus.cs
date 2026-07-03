@@ -10,8 +10,5 @@ public enum Verkstallighetsstatus
     Verkstalld,
 
     /// <summary>Ett verkställande HA-anrop gjordes men det sista försöket misslyckades.</summary>
-    Misslyckad,
-
-    /// <summary>Beslutet medger verkställighet men inget anrop gjordes (enheten redan i önskat läge).</summary>
-    EjPakallad
+    Misslyckad
 }
