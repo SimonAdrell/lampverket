@@ -296,6 +296,26 @@ public class HandlaggareServiceTests
             diariet.Log.Select(a => a.Status));
     }
 
+    [Fact]
+    public async Task ProcessArendeAsync_AgentReportsMotiveringUtkast_NotifiesWithoutExtraDiarietRow()
+    {
+        var notifier = new FakeArendeNotifier();
+        var now = new DateTimeOffset(2026, 5, 15, 10, 0, 0, TimeSpan.Zero);
+        var beslut = TestAvslag();
+        var fakeAgent = new ReportingHandlaggareAgent(beslut, null,
+            Handlaggningshandelse.ForMotiveringUtkast("Ansökan prövas mot skälig hemtrevnad."));
+        var diariet = new FakeDiariet();
+        var sut = MakeSut(new FakeTimeProvider(now), diariet: diariet, agent: fakeAgent, notifier: notifier);
+
+        var arende = await sut.RegisterAnsokanAsync(TestAnsokan("Banan", Arendetyp.Tanding));
+        await sut.ProcessArendeAsync(arende.Diarienummer);
+
+        Assert.Contains($"{IArendeNotifier.MotiveringPrefix}Ansökan prövas mot skälig hemtrevnad.", notifier.Steg);
+        Assert.Equal(
+            [Arendestatus.Inkommet, Arendestatus.Beslutat],
+            diariet.Log.Select(a => a.Status));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static HandlaggareService MakeSut(

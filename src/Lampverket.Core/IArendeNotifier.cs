@@ -2,6 +2,8 @@ namespace Lampverket.Core;
 
 public interface IArendeNotifier
 {
+    public const string MotiveringPrefix = "Motivering: ";
+
     Task NotifyAsync(string diarienummer, Arende arende);
 
     /// <summary>Called when a beslut lands for <paramref name="diarienummer"/>. Dispose to stop listening.</summary>

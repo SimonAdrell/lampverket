@@ -56,6 +56,92 @@ public class ArendeTests
         Assert.Contains("LV-2026-000099", cut.Markup);
     }
 
+    [Fact]
+    public async Task Arende_NoDecision_RendersStreamedMotivering()
+    {
+        var pending = new FakeArendeService(new Core.Arende(
+            Diarienummer: "LV-2026-000001",
+            Mottaget: DateTimeOffset.UtcNow,
+            Ansokan: FakeAnsokan(),
+            Status: Arendestatus.Inkommet
+        ));
+        using var ctx = CreateCtx(pending);
+        var cut = ctx.Render<ArendeDetalj>(p =>
+            p.Add(x => x.Diarienummer, "LV-2026-000001"));
+        var notifier = ctx.Services.GetRequiredService<IArendeNotifier>();
+
+        await notifier.NotifyStegAsync("LV-2026-000001",
+            $"{IArendeNotifier.MotiveringPrefix}Ansökan prövas mot skälig hemtrevnad.");
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.NotNull(cut.Find(".beslut-card"));
+            Assert.Contains("Beslut formuleras", cut.Markup);
+            Assert.Contains("Ansökan prövas mot skälig hemtrevnad.", cut.Markup);
+        });
+    }
+
+    [Fact]
+    public async Task Arende_BeslutFormulerasSteg_RendersProvisionalBeslutCard()
+    {
+        var pending = new FakeArendeService(new Core.Arende(
+            Diarienummer: "LV-2026-000001",
+            Mottaget: DateTimeOffset.UtcNow,
+            Ansokan: FakeAnsokan(),
+            Status: Arendestatus.Inkommet
+        ));
+        using var ctx = CreateCtx(pending);
+        var cut = ctx.Render<ArendeDetalj>(p =>
+            p.Add(x => x.Diarienummer, "LV-2026-000001"));
+        var notifier = ctx.Services.GetRequiredService<IArendeNotifier>();
+
+        await notifier.NotifyStegAsync("LV-2026-000001", "Beslut formuleras");
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.NotNull(cut.Find(".beslut-card"));
+            Assert.Contains("Beslut under upprättande", cut.Markup);
+        });
+    }
+
+    [Fact]
+    public async Task Arende_FinalBeslut_ReplacesStreamedMotivering()
+    {
+        var pendingArende = new Core.Arende(
+            Diarienummer: "LV-2026-000001",
+            Mottaget: DateTimeOffset.UtcNow,
+            Ansokan: FakeAnsokan(),
+            Status: Arendestatus.Inkommet
+        );
+        var finalArende = pendingArende with
+        {
+            Status = Arendestatus.Beslutat,
+            Beslut = new Core.Avslag(
+                Beslutstext: "Lampverket avslår ansökan.",
+                Motivering: "Slutlig komplett motivering.",
+                Lagrum: ["7 § lagen (2026:1)"],
+                Overklagandehanvisning: "Kan överklagas inom 3 veckor.",
+                Datum: DateTimeOffset.UtcNow)
+        };
+        var pending = new FakeArendeService(pendingArende);
+        using var ctx = CreateCtx(pending);
+        var cut = ctx.Render<ArendeDetalj>(p =>
+            p.Add(x => x.Diarienummer, "LV-2026-000001"));
+        var notifier = ctx.Services.GetRequiredService<IArendeNotifier>();
+
+        await notifier.NotifyStegAsync("LV-2026-000001",
+            $"{IArendeNotifier.MotiveringPrefix}Provisorisk motivering");
+        cut.WaitForAssertion(() => Assert.Contains("Provisorisk motivering", cut.Markup));
+
+        await notifier.NotifyAsync("LV-2026-000001", finalArende);
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("Slutlig komplett motivering.", cut.Markup);
+            Assert.DoesNotContain("Provisorisk motivering", cut.Markup);
+        });
+    }
+
     // ── backlog #14: beslut card renders ─────────────────────────────────────
     [Fact]
     public void Arende_WithBeslut_RendersBeslutCard()

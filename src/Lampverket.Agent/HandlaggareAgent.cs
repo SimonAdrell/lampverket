@@ -1,3 +1,4 @@
+using System.Text;
 using Anthropic;
 using Anthropic.Helpers.Beta;
 using Anthropic.Models.Beta.Messages;
@@ -69,7 +70,7 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
         progress?.Report(Handlaggningshandelse.ForSteg("Granskar hemförhållanden"));
 
         await DriveToolLoopAsync(
-            BuildParameters(arende.BuildUserMessage()), tools, MaxIterations, arende.Diarienummer, ct);
+            BuildParameters(arende.BuildUserMessage()), tools, MaxIterations, arende.Diarienummer, progress, ct);
 
         if (slot.Beslut is null)
         {
@@ -128,7 +129,7 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
         {
             await DriveToolLoopAsync(
                 BuildParameters(arende.BuildVerkstallighetsnudge(entityId, beslut.Verkstallighet)),
-                tools, VerkstallighetsnudgeMaxIterations, arende.Diarienummer, ct);
+                tools, VerkstallighetsnudgeMaxIterations, arende.Diarienummer, progress: null, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -156,24 +157,128 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
 
     private async Task DriveToolLoopAsync(
         MessageCreateParams parameters, IReadOnlyList<IBetaRunnableTool> tools,
-        int maxIterations, string diarienummer, CancellationToken ct)
+        int maxIterations, string diarienummer, IProgress<Handlaggningshandelse>? progress, CancellationToken ct)
     {
         var toolRunner = _anthropic.Beta.Messages.ToolRunner(parameters, tools, maxIterations: maxIterations);
 
         var iterations = 0;
-        await foreach (var message in toolRunner.WithCancellation(ct))
+        await foreach (var stream in toolRunner.Streaming(ct).WithCancellation(ct))
         {
             iterations++;
+            long? beslutToolBlock = null;
+            var beslutInputJson = new StringBuilder();
+            string? senasteMotivering = null;
+            BetaStopReason? stopReason = null;
+
+            await foreach (var streamEvent in stream.WithCancellation(ct))
+            {
+                if (streamEvent.TryPickContentBlockStart(out var start)
+                    && start.ContentBlock.TryPickBetaToolUse(out var toolUse)
+                    && toolUse.Name == "lamna_beslut")
+                {
+                    beslutToolBlock = start.Index;
+                    beslutInputJson.Clear();
+                    progress?.Report(Handlaggningshandelse.ForSteg("Beslut formuleras"));
+                }
+                else if (streamEvent.TryPickContentBlockDelta(out var delta)
+                         && delta.Index == beslutToolBlock
+                         && delta.Delta.TryPickInputJson(out var inputJson))
+                {
+                    beslutInputJson.Append(inputJson.PartialJson);
+                    var motivering = TryExtractMotivering(beslutInputJson.ToString());
+                    if (!string.IsNullOrWhiteSpace(motivering) && motivering != senasteMotivering)
+                    {
+                        senasteMotivering = motivering;
+                        progress?.Report(Handlaggningshandelse.ForMotiveringUtkast(motivering));
+                    }
+                }
+                else if (streamEvent.TryPickContentBlockStop(out var stop))
+                {
+                    if (stop.Index == beslutToolBlock)
+                    {
+                        beslutToolBlock = null;
+                        beslutInputJson.Clear();
+                    }
+                }
+                else if (streamEvent.TryPickDelta(out var messageDelta)
+                         && messageDelta.Delta.StopReason is { } messageStopReason)
+                {
+                    stopReason = messageStopReason.Value();
+                }
+            }
+
             _logger.LogDebug(
                 "Agent turn {Iteration} for {Diarienummer}: stop_reason={StopReason}",
-                iterations, diarienummer, message.StopReason);
+                iterations, diarienummer, stopReason);
 
-            if (message.StopReason != BetaStopReason.ToolUse)
+            if (stopReason != BetaStopReason.ToolUse)
             {
                 _logger.LogInformation(
                     "Agent loop for {Diarienummer} ended after {Iterations} iteration(s); stop_reason={StopReason}",
-                    diarienummer, iterations, message.StopReason);
+                    diarienummer, iterations, stopReason);
             }
         }
+    }
+
+    private static string? TryExtractMotivering(string partialJson)
+    {
+        const string key = "\"motivering\"";
+        var keyIndex = partialJson.IndexOf(key, StringComparison.Ordinal);
+        if (keyIndex < 0)
+        {
+            return null;
+        }
+
+        var colon = partialJson.IndexOf(':', keyIndex + key.Length);
+        if (colon < 0)
+        {
+            return null;
+        }
+
+        var start = colon + 1;
+        while (start < partialJson.Length && char.IsWhiteSpace(partialJson[start]))
+        {
+            start++;
+        }
+
+        if (start >= partialJson.Length || partialJson[start] != '"')
+        {
+            return null;
+        }
+
+        var valueStart = start + 1;
+        var valueEnd = valueStart;
+        var escaped = false;
+        while (valueEnd < partialJson.Length)
+        {
+            var current = partialJson[valueEnd];
+            if (escaped)
+            {
+                escaped = false;
+            }
+            else if (current == '\\')
+            {
+                escaped = true;
+            }
+            else if (current == '"')
+            {
+                break;
+            }
+
+            valueEnd++;
+        }
+
+        var raw = partialJson[valueStart..valueEnd];
+        if (raw.Length == 0)
+        {
+            return null;
+        }
+
+        return raw
+            .Replace("\\n", "\n", StringComparison.Ordinal)
+            .Replace("\\r", "\r", StringComparison.Ordinal)
+            .Replace("\\t", "\t", StringComparison.Ordinal)
+            .Replace("\\\"", "\"", StringComparison.Ordinal)
+            .Replace("\\\\", "\\", StringComparison.Ordinal);
     }
 }
