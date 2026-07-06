@@ -22,20 +22,22 @@ internal sealed class HomeAssistantHealthCheck(IOptions<HomeAssistantOptions> op
             client.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", opts.Value.Token);
 
-            // Probe the MCP endpoint; GET returns 405 on HA cloud (POST-only), which still means reachable.
-            var uri = new Uri(opts.Value.BaseUrl.TrimEnd('/') + opts.Value.McpEndpointPath);
+            // Probe the REST API root. This is deliberately independent of McpEndpointPath,
+            // which HaMcpProvider owns, so health probing and MCP transport do not drift together.
+            var uri = new Uri(opts.Value.BaseUrl.TrimEnd('/') + "/api/");
             using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct);
 
             if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
                 return HealthCheckResult.Unhealthy("Home Assistant token is invalid or expired.");
+            }
 
-            // 405 = MCP endpoint exists but rejects GET (POST-only) — server is reachable.
-            if (response.StatusCode == System.Net.HttpStatusCode.MethodNotAllowed)
+            if (response.IsSuccessStatusCode)
+            {
                 return HealthCheckResult.Healthy();
+            }
 
-            return response.IsSuccessStatusCode
-                ? HealthCheckResult.Healthy()
-                : HealthCheckResult.Degraded($"Home Assistant returned {(int)response.StatusCode} {response.ReasonPhrase}");
+            return HealthCheckResult.Degraded($"Home Assistant returned {(int)response.StatusCode} {response.ReasonPhrase}");
         }
         catch (Exception ex)
         {
