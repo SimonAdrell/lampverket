@@ -127,6 +127,11 @@ public sealed class HandlaggareService(IDiariet diariet, IHandlaggareAgent agent
             Activity.Current?.AddEvent(new ActivityEvent(steg));
             _ = _notifier.NotifyStegAsync(arende.Diarienummer, steg);
         }
+        else if (handelse.MotiveringUtkast is { } motivering)
+        {
+            Activity.Current?.AddEvent(new ActivityEvent("Motivering strömmas"));
+            _ = _notifier.NotifyStegAsync(arende.Diarienummer, $"{IArendeNotifier.MotiveringPrefix}{motivering}");
+        }
     }
 
     private sealed class DirektProgress<T>(Action<T> report) : IProgress<T>

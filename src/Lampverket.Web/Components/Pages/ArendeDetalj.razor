@@ -11,12 +11,7 @@
 {
     <p>Laddar…</p>
 }
-else if (_arende.Beslut is null)
-{
-    <p class="status-pill underhandlaggning">@(_steg ?? "Under handläggning")</p>
-    <p>Ärendet bereds. Beslutet presenteras här när handläggningen är klar.</p>
-}
-else
+else if (_arende.Beslut is not null || ArBeslutFormuleras)
 {
     <div class="beslut-card">
         <pre class="beslut-header">LAMPVERKET
@@ -30,7 +25,7 @@ BESLUT</pre>
             </tr>
             <tr>
                 <th>Datum:</th>
-                <td>@_arende.Beslut.Datum.ToString("yyyy-MM-dd")</td>
+                <td>@(_arende.Beslut?.Datum.ToString("yyyy-MM-dd") ?? "Under upprättande")</td>
             </tr>
             <tr>
                 <th>Handläggare:</th>
@@ -42,59 +37,75 @@ BESLUT</pre>
             </tr>
         </table>
 
-        <p class="status-pill @_arende.Status.CssKlass()">@_arende.Status.Text()</p>
-
-        <p class="beslut-typ">@BeslutRubrik(_arende.Beslut)</p>
-        <p>@_arende.Beslut.Beslutstext</p>
-
-        <h3>Motivering</h3>
-        <p>@_arende.Beslut.Motivering</p>
-
-        @if (_arende.Beslut.Lagrum.Length > 0)
+        @if (_arende.Beslut is null)
         {
-            <ul>
-                @foreach (var lag in _arende.Beslut.Lagrum)
+            <p class="status-pill underhandlaggning">Beslut formuleras</p>
+            <p class="beslut-typ">Beslut under upprättande</p>
+
+            <h3>Motivering</h3>
+            <p>@(_motiveringUtkast ?? "…")</p>
+        }
+        else
+        {
+            <p class="status-pill @_arende.Status.CssKlass()">@_arende.Status.Text()</p>
+
+            <p class="beslut-typ">@BeslutRubrik(_arende.Beslut)</p>
+            <p>@_arende.Beslut.Beslutstext</p>
+
+            <h3>Motivering</h3>
+            <p>@_arende.Beslut.Motivering</p>
+
+            @if (_arende.Beslut.Lagrum.Length > 0)
+            {
+                <ul>
+                    @foreach (var lag in _arende.Beslut.Lagrum)
+                    {
+                        <li>@lag</li>
+                    }
+                </ul>
+            }
+
+            <h3>Hur man överklagar</h3>
+            <p>@_arende.Beslut.Overklagandehanvisning</p>
+
+            @if (_arende.Beslut is VerkstalltBeslut verk)
+            {
+                <h3>Verkställighet</h3>
+                @* Verkställt ⇒ åtgärden bekräftad (även äldre diariet-rader utan utfall). Beslutat betyder
+                   att åtgärden ännu inte verkställts — antingen misslyckat försök eller inget försök alls. *@
+                @if (_arende.Status == Arendestatus.Verkstallt)
                 {
-                    <li>@lag</li>
+                    <p>@verk.Verkstallighet</p>
                 }
-            </ul>
-        }
-
-        <h3>Hur man överklagar</h3>
-        <p>@_arende.Beslut.Overklagandehanvisning</p>
-
-        @if (_arende.Beslut is VerkstalltBeslut verk)
-        {
-            <h3>Verkställighet</h3>
-            @* Verkställt ⇒ åtgärden bekräftad (även äldre diariet-rader utan utfall). Beslutat betyder
-               att åtgärden ännu inte verkställts — antingen misslyckat försök eller inget försök alls. *@
-            @if (_arende.Status == Arendestatus.Verkstallt)
-            {
-                <p>@verk.Verkstallighet</p>
+                else if (_arende.Verkstallighetsutfall == Verkstallighetsstatus.Misslyckad)
+                {
+                    <p>Beslutad åtgärd: @verk.Verkstallighet</p>
+                    <p class="verkstallighet-hinder">
+                        Verkställighetshinder: beslutet har fattats men åtgärden kunde inte verkställas.
+                        Ärendet kvarstår i status Beslutat i avvaktan på förnyad verkställighet.
+                    </p>
+                }
+                else
+                {
+                    <p>Beslutad åtgärd: @verk.Verkstallighet</p>
+                    <p class="verkstallighet-hinder">
+                        Verkställighet har ännu inte bekräftats. Ärendet kvarstår i status
+                        Beslutat i avvaktan på verkställighet.
+                    </p>
+                }
             }
-            else if (_arende.Verkstallighetsutfall == Verkstallighetsstatus.Misslyckad)
-            {
-                <p>Beslutad åtgärd: @verk.Verkstallighet</p>
-                <p class="verkstallighet-hinder">
-                    Verkställighetshinder: beslutet har fattats men åtgärden kunde inte verkställas.
-                    Ärendet kvarstår i status Beslutat i avvaktan på förnyad verkställighet.
-                </p>
-            }
-            else
-            {
-                <p>Beslutad åtgärd: @verk.Verkstallighet</p>
-                <p class="verkstallighet-hinder">
-                    Verkställighet har ännu inte bekräftats. Ärendet kvarstår i status
-                    Beslutat i avvaktan på verkställighet.
-                </p>
-            }
-        }
 
-        @if (_arende.Beslut is Avslag or Avvisning)
-        {
-            <a class="overklaga-btn" href="/ny-ansokan">Överklaga beslut</a>
+            @if (_arende.Beslut is Avslag or Avvisning)
+            {
+                <a class="overklaga-btn" href="/ny-ansokan">Överklaga beslut</a>
+            }
         }
     </div>
+}
+else
+{
+    <p class="status-pill underhandlaggning">@(_steg ?? "Under handläggning")</p>
+    <p>Ärendet bereds. Beslutet presenteras här när handläggningen är klar.</p>
 }
 
 @code {
@@ -103,8 +114,13 @@ BESLUT</pre>
 
     private Core.Arende? _arende;
     private string? _steg;
+    private string? _motiveringUtkast;
     private IDisposable? _subscription;
     private IDisposable? _stegSubscription;
+
+    private bool ArBeslutFormuleras =>
+        !string.IsNullOrWhiteSpace(_motiveringUtkast)
+        || string.Equals(_steg, "Beslut formuleras", StringComparison.Ordinal);
 
     private static string BeslutRubrik(Beslut b) => b switch
     {
@@ -125,6 +141,7 @@ BESLUT</pre>
         _stegSubscription?.Dispose();
         _stegSubscription = null;
         _steg = null;
+        _motiveringUtkast = null;
 
         _arende = await Handlaggare.HamtaArendeAsync(Diarienummer);
 
@@ -137,6 +154,10 @@ BESLUT</pre>
             InvokeAsync(() =>
             {
                 _arende = arende;
+                if (arende.Beslut is not null)
+                {
+                    _motiveringUtkast = null;
+                }
                 StateHasChanged();
             }));
 
@@ -144,7 +165,15 @@ BESLUT</pre>
         _stegSubscription = Notifier.SubscribeSteg(Diarienummer, steg =>
             InvokeAsync(() =>
             {
-                _steg = steg;
+                if (steg.StartsWith(IArendeNotifier.MotiveringPrefix, StringComparison.Ordinal))
+                {
+                    _motiveringUtkast = steg[IArendeNotifier.MotiveringPrefix.Length..];
+                    _steg = "Beslut formuleras";
+                }
+                else
+                {
+                    _steg = steg;
+                }
                 StateHasChanged();
             }));
 
@@ -157,6 +186,7 @@ BESLUT</pre>
             _subscription = null;
             _stegSubscription.Dispose();
             _stegSubscription = null;
+            _motiveringUtkast = null;
             StateHasChanged();
         }
     }

@@ -12,7 +12,9 @@ public sealed record Handlaggningshandelse
 {
     public string? Steg { get; private init; }
     public Beslut? Beslut { get; private init; }
+    public string? MotiveringUtkast { get; private init; }
 
     public static Handlaggningshandelse ForSteg(string steg) => new() { Steg = steg };
     public static Handlaggningshandelse ForBeslut(Beslut beslut) => new() { Beslut = beslut };
+    public static Handlaggningshandelse ForMotiveringUtkast(string motivering) => new() { MotiveringUtkast = motivering };
 }
