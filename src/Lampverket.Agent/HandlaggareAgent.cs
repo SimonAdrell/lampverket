@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using Anthropic;
 using Anthropic.Helpers.Beta;
 using Anthropic.Models.Beta.Messages;
@@ -17,10 +19,11 @@ namespace Lampverket.Agent;
 /// </summary>
 public sealed class HandlaggareAgent : IHandlaggareAgent
 {
-    private const int MaxIterations = 10;
+    private const int DecisionMaxAttempts = 2;
+    private const string BeslutToolName = "lamna_beslut";
 
-    // Verkställighetsnudgen: en avgränsad andra runda. Lyckoscenariot är GetLiveContext →
-    // verkställande anrop → kort bekräftelse; 4 ger marginal utan att släppa loss loopen.
+    // Verkställighetsnudgen: en avgränsad andra runda. Kontexten hämtades i fas 1 och kan vara
+    // upp till några sekunder gammal här; fas 3 får därför bara verkställande verktyg.
     private const int VerkstallighetsnudgeMaxIterations = 4;
 
     private readonly IAnthropicClient _anthropic;
@@ -51,7 +54,6 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
     public async Task<Handlaggningsresultat> HandlaggaAsync(
         Arende arende, IProgress<Handlaggningshandelse>? progress = null, CancellationToken ct = default)
     {
-        var haTools = await _mcpProvider.GetToolsAsync(ct);
         var device = _haOptions.Devices
             .FirstOrDefault(d => d.EntityId == arende.Ansokan.BerordEnhet.EntityId);
 
@@ -61,32 +63,30 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
                 Beslut.BordlaggOkandEnhet(_clock.GetUtcNow(), arende.Ansokan.BerordEnhet.FriendlyName), null);
         }
 
+        var haTools = await _mcpProvider.GetToolsAsync(ct);
         var filtered = HaToolFilter.ForEntity(haTools, device.EntityId);
         var slot = new BeslutSlot();
-        var tools = _toolFactory.Build(filtered, slot, arende.Diarienummer, progress);
+        var beslutTool = HaToolFactory.BuildBeslutTool();
+        var actionTools = _toolFactory.BuildHaActionTools(filtered, slot, arende.Diarienummer, device.EntityId, progress);
 
-        // Beredningen börjar: nudga sidan bort från den statiska väntetexten. Claude anropar
-        // GetLiveContext härnäst för att granska enhetens tillstånd före beslut (konvention #6).
         progress?.Report(Handlaggningshandelse.ForSteg("Granskar hemförhållanden"));
-
-        await DriveToolLoopAsync(
-            BuildParameters(arende.BuildUserMessage()), tools, MaxIterations, arende.Diarienummer, progress, ct);
+        var liveContext = await FetchLiveContextAsync(device.EntityId, ct);
+        await RunDecisionPhaseAsync(arende, liveContext, beslutTool, slot, progress, ct);
 
         if (slot.Beslut is null)
         {
             _logger.LogWarning(
-                "Agent loop for {Diarienummer} ended without a valid beslut",
+                "Decision phase for {Diarienummer} ended without a valid beslut",
                 arende.Diarienummer);
             return new Handlaggningsresultat(Beslut.BordlaggUtanBeslut(_clock.GetUtcNow()), null);
         }
 
-        // Åtgärd efter bifall: ett bifall som aldrig verkställdes nudgas att verkställas i en
-        // andra, avgränsad runda. Beslutet ligger redan i slot, så guarden släpper igenom det
-        // verkställande anropet — åtgärden reser fortfarande genom Claudes tool_use (konvention #8).
+        // Fas 2 exponerar inga HA-verktyg. Verkställbara beslut kommer därför hit utan utfall och
+        // fas 3 blir normalvägen för faktisk Home Assistant-verkställighet.
         if (BehoverVerkstallighetsnudge(slot.Beslut, slot.Verkstallighetsutfall)
             && slot.Beslut is VerkstalltBeslut nudgeBeslut)
         {
-            await NudgaVerkstallighetAsync(arende, device.EntityId, nudgeBeslut, tools, ct);
+            await NudgaVerkstallighetAsync(arende, device.EntityId, nudgeBeslut, actionTools, ct);
 
             if (slot.Verkstallighetsutfall is null)
             {
@@ -115,6 +115,179 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
     public static bool BehoverVerkstallighetsnudge(Beslut? beslut, Verkstallighetsstatus? utfall) =>
         beslut is VerkstalltBeslut && utfall is null;
 
+    private async Task<string> FetchLiveContextAsync(string entityId, CancellationToken ct)
+    {
+        using var activity = AgentDiagnostics.Source.StartActivity("handläggning.context");
+        activity?.SetTag("entity.id", entityId);
+        var context = await _mcpProvider.GetLiveContextAsync(entityId, ct);
+        activity?.SetTag("context.length", context.Length);
+        return context;
+    }
+
+    private async Task RunDecisionPhaseAsync(
+        Arende arende,
+        string liveContext,
+        BetaToolUnion beslutTool,
+        BeslutSlot slot,
+        IProgress<Handlaggningshandelse>? progress,
+        CancellationToken ct)
+    {
+        for (var attempt = 1; attempt <= DecisionMaxAttempts && slot.Beslut is null; attempt++)
+        {
+            using var activity = AgentDiagnostics.Source.StartActivity("handläggning.decision");
+            activity?.SetTag("diarienummer", arende.Diarienummer);
+            activity?.SetTag("attempt", attempt);
+
+            var inputJson = await StreamForcedBeslutAsync(
+                BuildDecisionParameters(arende, liveContext, beslutTool),
+                arende.Diarienummer,
+                progress,
+                activity,
+                ct);
+
+            if (TryRegisterBeslut(inputJson, slot, arende.Diarienummer, progress))
+            {
+                activity?.SetStatus(ActivityStatusCode.Ok);
+                activity?.AddEvent(new ActivityEvent("beslut completed"));
+                return;
+            }
+
+            activity?.SetStatus(ActivityStatusCode.Error, "invalid beslut");
+            if (attempt < DecisionMaxAttempts)
+            {
+                _logger.LogWarning(
+                    "Forced decision attempt {Attempt} for {Diarienummer} produced invalid beslut; retrying once.",
+                    attempt, arende.Diarienummer);
+            }
+        }
+    }
+
+    private MessageCreateParams BuildDecisionParameters(
+        Arende arende, string liveContext, BetaToolUnion beslutTool) => new()
+    {
+        Model = AnthropicModel.ClaudeSonnet4_6,
+        MaxTokens = 4096,
+        System = new List<BetaTextBlockParam>
+        {
+            new() { Text = _systemPrompt, CacheControl = new BetaCacheControlEphemeral() },
+        },
+        Messages =
+        [
+            new BetaMessageParam
+            {
+                Role = Role.User,
+                Content = arende.BuildUserMessageWithLiveContext(liveContext),
+            },
+        ],
+        Tools = [beslutTool],
+        ToolChoice = new BetaToolChoice(
+            new BetaToolChoiceTool(BeslutToolName) { DisableParallelToolUse = true },
+            null),
+    };
+
+    private async Task<string> StreamForcedBeslutAsync(
+        MessageCreateParams parameters,
+        string diarienummer,
+        IProgress<Handlaggningshandelse>? progress,
+        Activity? activity,
+        CancellationToken ct)
+    {
+        long? beslutToolBlock = null;
+        var beslutInputJson = new StringBuilder();
+        string? senasteMotivering = null;
+        var firstMotiveringReported = false;
+        BetaStopReason? stopReason = null;
+        var stopwatch = Stopwatch.StartNew();
+
+        await foreach (var streamEvent in _anthropic.Beta.Messages.CreateStreaming(parameters, ct).WithCancellation(ct))
+        {
+            if (streamEvent.TryPickContentBlockStart(out var start)
+                && start.ContentBlock.TryPickBetaToolUse(out var toolUse)
+                && toolUse.Name == BeslutToolName)
+            {
+                beslutToolBlock = start.Index;
+                beslutInputJson.Clear();
+                activity?.AddEvent(new ActivityEvent("lamna_beslut start"));
+                activity?.SetTag("decision.beslut_start_ms", stopwatch.ElapsedMilliseconds);
+                progress?.Report(Handlaggningshandelse.ForSteg("Beslut formuleras"));
+            }
+            else if (streamEvent.TryPickContentBlockDelta(out var delta)
+                     && delta.Index == beslutToolBlock
+                     && delta.Delta.TryPickInputJson(out var inputJson))
+            {
+                beslutInputJson.Append(inputJson.PartialJson);
+                var motivering = TryExtractMotivering(beslutInputJson.ToString());
+                if (!string.IsNullOrWhiteSpace(motivering) && motivering != senasteMotivering)
+                {
+                    if (!firstMotiveringReported)
+                    {
+                        activity?.AddEvent(new ActivityEvent("first motivering delta"));
+                        activity?.SetTag("decision.first_motivering_ms", stopwatch.ElapsedMilliseconds);
+                        firstMotiveringReported = true;
+                    }
+
+                    senasteMotivering = motivering;
+                    progress?.Report(Handlaggningshandelse.ForMotiveringUtkast(motivering));
+                }
+            }
+            else if (streamEvent.TryPickContentBlockStop(out var stop))
+            {
+                if (stop.Index == beslutToolBlock)
+                {
+                    beslutToolBlock = null;
+                }
+            }
+            else if (streamEvent.TryPickDelta(out var messageDelta)
+                     && messageDelta.Delta.StopReason is { } messageStopReason)
+            {
+                stopReason = messageStopReason.Value();
+            }
+        }
+
+        _logger.LogDebug(
+            "Decision phase for {Diarienummer}: stop_reason={StopReason}, input_json_chars={Length}",
+            diarienummer, stopReason, beslutInputJson.Length);
+
+        return beslutInputJson.ToString();
+    }
+
+    private bool TryRegisterBeslut(
+        string inputJson,
+        BeslutSlot slot,
+        string diarienummer,
+        IProgress<Handlaggningshandelse>? progress)
+    {
+        if (string.IsNullOrWhiteSpace(inputJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            var input = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(inputJson);
+            if (input is null)
+            {
+                return false;
+            }
+
+            var beslut = BeslutParser.TryParse(input, _clock.GetUtcNow(), diarienummer, _logger);
+            if (beslut is null || !slot.TrySet(beslut))
+            {
+                return false;
+            }
+
+            progress?.Report(Handlaggningshandelse.ForBeslut(beslut));
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to parse streamed beslut JSON for {Diarienummer}: {InputJson}",
+                diarienummer, inputJson);
+            return false;
+        }
+    }
+
     // Kör en avgränsad andra runda som förelägger Claude att verkställa det redan fattade beslutet.
     // Bästa möjliga insats: ett fel i denna runda får inte bubbla upp och förvandla ett giltigt
     // bifall till en bordläggning (HandlaggareService fångar undantag och bordlägger).
@@ -122,14 +295,20 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
         Arende arende, string entityId, VerkstalltBeslut beslut,
         IReadOnlyList<IBetaRunnableTool> tools, CancellationToken ct)
     {
-        _logger.LogWarning(
-            "Bifall för {Diarienummer} saknar verkställighet; kör verkställighetsnudge.",
-            arende.Diarienummer);
+        using var activity = AgentDiagnostics.Source.StartActivity("handläggning.execution");
+        activity?.SetTag("diarienummer", arende.Diarienummer);
+        activity?.SetTag("entity.id", entityId);
+
+        _logger.LogInformation(
+            "Bifall för {Diarienummer} saknar verkställighet; kör verkställighetsnudge med {ToolCount} verktyg: {Tools}.",
+            arende.Diarienummer,
+            tools.Count,
+            string.Join(", ", tools.Select(t => t.Name)));
         try
         {
             await DriveToolLoopAsync(
                 BuildParameters(arende.BuildVerkstallighetsnudge(entityId, beslut.Verkstallighet)),
-                tools, VerkstallighetsnudgeMaxIterations, arende.Diarienummer, progress: null, ct);
+                tools, VerkstallighetsnudgeMaxIterations, arende.Diarienummer, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -139,6 +318,7 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
         }
     }
 
+    // Fas 3 (verkställighetsnudgen) tvingar alltid fram ett verktygsanrop.
     private MessageCreateParams BuildParameters(string userMessage) => new()
     {
         Model = AnthropicModel.ClaudeSonnet4_6,
@@ -153,11 +333,14 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
         [
             new BetaMessageParam { Role = Role.User, Content = userMessage },
         ],
+        ToolChoice = new BetaToolChoice(new BetaToolChoiceAny { DisableParallelToolUse = true }, null),
     };
 
+    // Fas 3: nudgen exponerar bara verkställande HA-verktyg (inget lamna_beslut), så här behöver
+    // loopen bara drivas och stop_reason avläsas för loggen — ingen ström-parsning av beslut.
     private async Task DriveToolLoopAsync(
         MessageCreateParams parameters, IReadOnlyList<IBetaRunnableTool> tools,
-        int maxIterations, string diarienummer, IProgress<Handlaggningshandelse>? progress, CancellationToken ct)
+        int maxIterations, string diarienummer, CancellationToken ct)
     {
         var toolRunner = _anthropic.Beta.Messages.ToolRunner(parameters, tools, maxIterations: maxIterations);
 
@@ -165,43 +348,12 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
         await foreach (var stream in toolRunner.Streaming(ct).WithCancellation(ct))
         {
             iterations++;
-            long? beslutToolBlock = null;
-            var beslutInputJson = new StringBuilder();
-            string? senasteMotivering = null;
             BetaStopReason? stopReason = null;
 
             await foreach (var streamEvent in stream.WithCancellation(ct))
             {
-                if (streamEvent.TryPickContentBlockStart(out var start)
-                    && start.ContentBlock.TryPickBetaToolUse(out var toolUse)
-                    && toolUse.Name == "lamna_beslut")
-                {
-                    beslutToolBlock = start.Index;
-                    beslutInputJson.Clear();
-                    progress?.Report(Handlaggningshandelse.ForSteg("Beslut formuleras"));
-                }
-                else if (streamEvent.TryPickContentBlockDelta(out var delta)
-                         && delta.Index == beslutToolBlock
-                         && delta.Delta.TryPickInputJson(out var inputJson))
-                {
-                    beslutInputJson.Append(inputJson.PartialJson);
-                    var motivering = TryExtractMotivering(beslutInputJson.ToString());
-                    if (!string.IsNullOrWhiteSpace(motivering) && motivering != senasteMotivering)
-                    {
-                        senasteMotivering = motivering;
-                        progress?.Report(Handlaggningshandelse.ForMotiveringUtkast(motivering));
-                    }
-                }
-                else if (streamEvent.TryPickContentBlockStop(out var stop))
-                {
-                    if (stop.Index == beslutToolBlock)
-                    {
-                        beslutToolBlock = null;
-                        beslutInputJson.Clear();
-                    }
-                }
-                else if (streamEvent.TryPickDelta(out var messageDelta)
-                         && messageDelta.Delta.StopReason is { } messageStopReason)
+                if (streamEvent.TryPickDelta(out var messageDelta)
+                    && messageDelta.Delta.StopReason is { } messageStopReason)
                 {
                     stopReason = messageStopReason.Value();
                 }
@@ -220,7 +372,7 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
         }
     }
 
-    private static string? TryExtractMotivering(string partialJson)
+    internal static string? TryExtractMotivering(string partialJson)
     {
         const string key = "\"motivering\"";
         var keyIndex = partialJson.IndexOf(key, StringComparison.Ordinal);
@@ -274,11 +426,73 @@ public sealed class HandlaggareAgent : IHandlaggareAgent
             return null;
         }
 
-        return raw
-            .Replace("\\n", "\n", StringComparison.Ordinal)
-            .Replace("\\r", "\r", StringComparison.Ordinal)
-            .Replace("\\t", "\t", StringComparison.Ordinal)
-            .Replace("\\\"", "\"", StringComparison.Ordinal)
-            .Replace("\\\\", "\\", StringComparison.Ordinal);
+        return UnescapePartialJsonString(raw);
+    }
+
+    private static string UnescapePartialJsonString(string raw)
+    {
+        var output = new StringBuilder(raw.Length);
+        for (var i = 0; i < raw.Length; i++)
+        {
+            var current = raw[i];
+            if (current != '\\')
+            {
+                output.Append(current);
+                continue;
+            }
+
+            if (i + 1 >= raw.Length)
+            {
+                break;
+            }
+
+            var escaped = raw[++i];
+            switch (escaped)
+            {
+                case 'n':
+                    output.Append('\n');
+                    break;
+                case 'r':
+                    output.Append('\r');
+                    break;
+                case 't':
+                    output.Append('\t');
+                    break;
+                case '"':
+                    output.Append('"');
+                    break;
+                case '\\':
+                    output.Append('\\');
+                    break;
+                case 'u':
+                    if (i + 4 >= raw.Length)
+                    {
+                        i = raw.Length;
+                        break;
+                    }
+
+                    var hex = raw.Substring(i + 1, 4);
+                    if (ushort.TryParse(
+                            hex,
+                            System.Globalization.NumberStyles.HexNumber,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var codePoint))
+                    {
+                        output.Append((char)codePoint);
+                        i += 4;
+                    }
+                    else
+                    {
+                        output.Append("\\u").Append(hex);
+                        i += 4;
+                    }
+                    break;
+                default:
+                    output.Append(escaped);
+                    break;
+            }
+        }
+
+        return output.ToString();
     }
 }

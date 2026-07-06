@@ -314,6 +314,8 @@ public class HandlaggareServiceTests
         Assert.Equal(
             [Arendestatus.Inkommet, Arendestatus.Beslutat],
             diariet.Log.Select(a => a.Status));
+        Assert.DoesNotContain(diariet.Log, a => a.Beslut?.Motivering == "Ansökan prövas mot skälig hemtrevnad.");
+        Assert.Equal("Testmotivering.", diariet.Log.Last().Beslut?.Motivering);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

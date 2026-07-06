@@ -22,4 +22,8 @@
     <ProjectReference Include="..\Lampverket.Core\Lampverket.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Lampverket.Agent.Tests" />
+  </ItemGroup>
+
 </Project>

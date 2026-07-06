@@ -19,7 +19,7 @@ All-.NET, to showcase agentic AI in C#:
 - **Runtime:** .NET 10, C#
 - **Orchestration:** **.NET Aspire** (AppHost, ServiceDefaults, ApiService) — service composition and dev-time orchestration.
 - **Front end:** **Blazor Web App** (interactive Server render mode) — the e-tjänst portal. SignalR pushes the *beslut* to the page live. See `docs/WEBAPP.md`.
-- **Agent:** a C# *handläggare* service calling Claude via the official **`Anthropic`** NuGet (with `Anthropic.Mcp` for MCP integration). Runs a multi-turn agentic loop via the SDK's `BetaToolRunner`; Claude orchestrates HA MCP tool calls and the structured `lamna_beslut` tool.
+- **Agent:** a C# *handläggare* service calling Claude via the official **`Anthropic`** NuGet (with `Anthropic.Mcp` for MCP integration). Runs a structured decision pipeline followed by an agentic execution phase; Claude issues the structured `lamna_beslut` decision, then selects HA MCP action tools when execution is allowed.
 - **Device control:** Home Assistant via the official **C# MCP SDK** (`ModelContextProtocol`). `Lampverket.Agent` connects directly to Home Assistant's built-in **MCP Server** and exposes its Assist tools (`GetLiveContext`, `HassTurnOn`, `HassTurnOff`, `HassLightSet`, `HassSetVolume`, `HassMediaSearchAndPlay`) to Claude. See `docs/DEVICES.md`.
 - **Persistence (diariet):** append-only log — JSONL file for the weekend build, SQLite via EF Core as an upgrade.
 - **Secrets:** Anthropic key + Home Assistant token via **.NET user-secrets** (dev) / environment variables (prod). Never in committed `appsettings.json`.
@@ -60,9 +60,9 @@ These are load-bearing for the project to "work" as intended:
 3. **No action without a decision.** Claude must call `lamna_beslut` *before* any Home Assistant action tool. Enforced by a C# guard in `HaToolFactory.GuardHaTool` that returns an error tool-result (a normal, non-`is_error` result) for any HA action tool emitted before the beslut.
 4. **Everything is logged.** Every ärende (received, decided, executed, appealed) is appended to the diariet with its diarienummer. The audit trail is a feature.
 5. **Respect the state machine.** Inkommet → Beslutat → Verkställt (bifall/delvis bifall, execution confirmed; stays Beslutat if it fails), or Inkommet → Beslutat (avslag/avvisning), or Inkommet → Bordlagt. "Under handläggning" is derived (no `Beslut` yet), not a stored status. See `docs/ARCHITECTURE.md`.
-6. **Check before acting.** Claude must call `GetLiveContext` for the affected entity before issuing the beslut (instructed via the system prompt).
+6. **Check before acting.** Live context must be fetched and supplied before the beslut; enforcement lives in C#.
 7. **Fail in character.** An unavailable device or MCP error is surfaced to Claude as a tool result; Claude responds with a *bordläggs*-style beslut, not a stack trace.
-8. **Agentic loop with deterministic guardrails.** Claude *orchestrates*; C# *enforces invariants* (beslut-before-action, max iterations, allowed entity scope). The HA call is still a real side effect — it travels through Claude's `tool_use`, not a switch statement in `HandlaggareService`.
+8. **Structured decision pipeline + agentic execution phase.** C# fetches live context and forces one structured `lamna_beslut` decision turn. Claude remains agentic in the execution phase, where it picks HA tool + params via `tool_use`; the beslut-before-action guard remains as defense-in-depth.
 
 ## Safety
 

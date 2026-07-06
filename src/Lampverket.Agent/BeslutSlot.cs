@@ -12,10 +12,18 @@ public sealed class BeslutSlot
     public bool TrySet(Beslut beslut) =>
         Interlocked.CompareExchange(ref _beslut, beslut, null) is null;
 
-    // Sista försöket vinner: en retry som lyckas efter ett fel innebär att åtgärden faktiskt utfördes.
-    // Till skillnad från beslutet (en oföränderlig rättsakt) är utfallet en observation som kan uppdateras.
-    public void RegistreraVerkstallighetsforsok(bool lyckat) =>
-        Interlocked.Exchange(ref _verkstallighetsutfall, lyckat ? 1 : 2);
+    // Bekräftad verkställighet vinner: en retry som lyckas efter ett fel innebär att åtgärden faktiskt
+    // utfördes, men ett senare fel får inte skriva över en redan bekräftad sidoeffekt.
+    public void RegistreraVerkstallighetsforsok(bool lyckat)
+    {
+        if (lyckat)
+        {
+            Interlocked.Exchange(ref _verkstallighetsutfall, 1);
+            return;
+        }
+
+        Interlocked.CompareExchange(ref _verkstallighetsutfall, 2, 0);
+    }
 
     public Verkstallighetsstatus? Verkstallighetsutfall => _verkstallighetsutfall switch
     {

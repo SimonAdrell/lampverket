@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Anthropic.Helpers.Beta;
 using Anthropic.Helpers.Beta.Mcp;
+using Anthropic.Models.Beta.Messages;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Client;
@@ -37,6 +39,44 @@ public sealed class HaMcpProvider : IAsyncDisposable
         return setup.Tools;
     }
 
+    public async Task<string> GetLiveContextAsync(string entityId, CancellationToken ct = default)
+    {
+        try
+        {
+            var setup = await _setup.Value.WaitAsync(ct);
+            var tool = setup.Tools.FirstOrDefault(t => t.Name == "GetLiveContext");
+            if (tool is null)
+            {
+                return "GetLiveContext saknas i Home Assistant MCP-verktygen.";
+            }
+
+            var toolUse = new BetaToolUseBlock
+            {
+                ID = $"live-context-{Guid.NewGuid():N}",
+                Name = "GetLiveContext",
+                Input = new Dictionary<string, JsonElement>
+                {
+                    ["name"] = JsonSerializer.SerializeToElement(entityId),
+                },
+            };
+
+            var response = await tool.ExecuteAsync(toolUse, ct);
+            return response.Json.ToString();
+        }
+        catch (BetaToolError ex)
+        {
+            _logger.LogWarning(
+                "GetLiveContext failed for {EntityId}: {Content}",
+                entityId, ex.Content.ToString());
+            return $"GetLiveContext returnerade fel för {entityId}: {ex.Content}";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "GetLiveContext failed for {EntityId}", entityId);
+            return $"GetLiveContext kunde inte hämtas för {entityId}: {ex.GetType().Name}: {ex.Message}";
+        }
+    }
+
     private async Task<McpSetup> InitialiseAsync()
     {
         var endpoint = new Uri(_haOptions.BaseUrl.TrimEnd('/') + _haOptions.McpEndpointPath);
@@ -55,7 +95,9 @@ public sealed class HaMcpProvider : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (_setup.IsValueCreated && _setup.Value.IsCompletedSuccessfully)
+        {
             await _setup.Value.Result.Client.DisposeAsync();
+        }
     }
 
     private sealed record McpSetup(McpClient Client, IReadOnlyList<IBetaRunnableTool> Tools);
