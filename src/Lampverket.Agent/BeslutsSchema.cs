@@ -5,9 +5,12 @@ namespace Lampverket.Agent;
 
 internal static class BeslutsSchema
 {
-    internal static InputSchema Build() => new()
+    private static readonly string[] RequiredFields =
+        ["beslutstyp", "beslutstext", "motivering", "lagrum", "overklagandehanvisning", "verkstallighet"];
+
+    internal static InputSchema Build()
     {
-        Properties = new Dictionary<string, JsonElement>
+        var properties = new Dictionary<string, JsonElement>
         {
             ["beslutstyp"] = JsonSerializer.SerializeToElement(new
             {
@@ -41,7 +44,14 @@ internal static class BeslutsSchema
                 type = "string",
                 description = "Vad ska utföras, eller varför ärendet bordläggs."
             }),
-        },
-        Required = ["beslutstyp", "beslutstext", "motivering", "lagrum", "overklagandehanvisning", "verkstallighet"],
-    };
+        };
+
+        return new InputSchema(new Dictionary<string, JsonElement>
+        {
+            ["type"] = JsonSerializer.SerializeToElement("object"),
+            ["properties"] = JsonSerializer.SerializeToElement(properties),
+            ["required"] = JsonSerializer.SerializeToElement(RequiredFields),
+            ["additionalProperties"] = JsonSerializer.SerializeToElement(false),
+        });
+    }
 }

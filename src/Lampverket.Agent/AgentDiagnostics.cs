@@ -3,10 +3,9 @@ using System.Diagnostics;
 namespace Lampverket.Agent;
 
 /// <summary>
-/// OpenTelemetry-källa för handläggningen. Spannet <c>handläggning</c> omsluter hela loopen så att
-/// de annars föräldralösa Anthropic-anropen nästlas under det, och stegen (Granskar hemförhållanden,
-/// Beslut fattat, Verkställer) läggs som tidsstämplade events — då syns beslutet ~8 s före loopens slut
-/// direkt i Aspire-tracen. Källnamnet registreras i ServiceDefaults (AddSource).
+/// OpenTelemetry-källa för handläggningen. Det omslutande spannet <c>handläggning</c> får separata
+/// under-spann för context, decision och execution så Aspire visar fasernas tider och decision TTFT.
+/// Källnamnet registreras i ServiceDefaults (AddSource).
 /// </summary>
 internal static class AgentDiagnostics
 {

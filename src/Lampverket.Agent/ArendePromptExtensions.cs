@@ -23,8 +23,19 @@ internal static class ArendePromptExtensions
         Handlägg ärendet enligt verktygsprotokollet.
     """;
 
+        public string BuildUserMessageWithLiveContext(string liveContext) => $"""
+    {arende.BuildUserMessage()}
+
+    Aktuellt hemtillstånd (GetLiveContext):
+    {liveContext}
+
+    Live context har hämtats av systemet före beslutsfasen. Anropa nu `lamna_beslut`
+    med det formella beslutet.
+    """;
+
         // Föreläggande i andra rundan: beslutet är redan fattat, så detta upphäver
-        // VERKTYGSPROTOKOLL steg 2 (lamna_beslut) och går direkt till verkställighet.
+        // VERKTYGSPROTOKOLL steg 1-2 (GetLiveContext + lamna_beslut) och går direkt till
+        // verkställighet. Kontexten hämtades i fas 1 och kan vara några sekunder gammal.
         public string BuildVerkstallighetsnudge(string entityId, string beslutadAtgard) => $"""
     <verkstallighetsforelaggande>
         Diarienummer: {arende.Diarienummer}
@@ -36,7 +47,8 @@ internal static class ArendePromptExtensions
         Verkställ nu: anropa den verkställande HA-funktionen (t.ex. HassTurnOn,
         HassLightSet) för enheten. Använd entity-id som `name`-parameter.
 
-        Beslutet är redan fattat — anropa INTE lamna_beslut igen. Gå direkt till
+        Beslutet är redan fattat och live context är redan inhämtat av systemet.
+        Anropa INTE lamna_beslut och anropa INTE GetLiveContext. Gå direkt till
         verkställighet och avsluta med en kort bekräftelse.
     </verkstallighetsforelaggande>
     """;

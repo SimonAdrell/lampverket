@@ -43,8 +43,8 @@ public sealed class HandlaggareService(IDiariet diariet, IHandlaggareAgent agent
             return;
         }
 
-        // Omslutande spann: nästlar Anthropic-anropen till en enda trace och bär steg-events (via
-        // Rapportera) så beslutet syns ~8 s före loopens slut direkt i Aspire.
+        // Omslutande spann: nästlar context-, decision- och execution-faserna till en enda trace och
+        // bär steg-events (via Rapportera) så decision TTFT går att läsa direkt i Aspire.
         using var activity = AgentDiagnostics.Source.StartActivity("handläggning");
         activity?.SetTag("diarienummer", diarienummer);
 

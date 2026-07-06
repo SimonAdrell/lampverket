@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Anthropic.Helpers.Beta;
 using Anthropic.Models.Beta.Messages;
 using Lampverket.Core;
@@ -5,29 +6,44 @@ using Microsoft.Extensions.Logging;
 
 namespace Lampverket.Agent.HomeAssistant;
 
-public sealed class HaToolFactory(TimeProvider clock, ILogger<HaToolFactory> logger)
+public sealed class HaToolFactory(ILogger<HaToolFactory> logger)
 {
     private const string BeslutToolName = "lamna_beslut";
     private static readonly HashSet<string> _beslutExemptTools = ["GetLiveContext"];
 
-    private readonly TimeProvider _clock = clock;
     private readonly ILogger<HaToolFactory> _logger = logger;
 
-    public IReadOnlyList<IBetaRunnableTool> Build(
+    public IReadOnlyList<IBetaRunnableTool> BuildHaActionTools(
         IReadOnlyList<IBetaRunnableTool> haTools,
         BeslutSlot slot,
         string diarienummer,
+        string? allowedEntityId = null,
         IProgress<Handlaggningshandelse>? progress = null)
     {
-        var tools = new List<IBetaRunnableTool>(haTools.Count + 1);
-        foreach (var haTool in haTools)
-            tools.Add(GuardHaTool(haTool, slot, diarienummer, progress));
-        tools.Add(BuildBeslutTool(slot, diarienummer, progress));
+        var tools = new List<IBetaRunnableTool>(haTools.Count);
+        foreach (var haTool in haTools.Where(t => !_beslutExemptTools.Contains(t.Name)))
+        {
+            tools.Add(GuardHaTool(haTool, slot, diarienummer, allowedEntityId, progress));
+        }
+
         return tools;
     }
 
+    // Only the definition is consumed: phase 2 forces tool_choice and registers the streamed input
+    // via HandlaggareAgent.TryRegisterBeslut, so no runner ever executes this tool.
+    public static BetaToolUnion BuildBeslutTool() => new(new BetaTool
+    {
+        Name = BeslutToolName,
+        Description = "Utfärda ett formellt beslut på ansökan. MÅSTE anropas före varje verkställande HA-anrop.",
+        InputSchema = BeslutsSchema.Build(),
+        EagerInputStreaming = true,
+        Strict = true,
+        // No cache_control: cached via the system-prompt prefix; no separate breakpoint needed.
+    });
+
     private BetaRunnableTool GuardHaTool(
         IBetaRunnableTool inner, BeslutSlot slot, string diarienummer,
+        string? allowedEntityId,
         IProgress<Handlaggningshandelse>? progress) =>
         new()
         {
@@ -48,7 +64,20 @@ public sealed class HaToolFactory(TimeProvider clock, ILogger<HaToolFactory> log
                         return DecisionForbidsError(toolUse.Name, beslut);
                     }
 
+                    if (slot.Verkstallighetsutfall == Verkstallighetsstatus.Verkstalld)
+                    {
+                        return $"Verkställighet är redan bekräftad för {diarienummer}. " +
+                               $"Ytterligare anrop till {toolUse.Name} utförs inte.";
+                    }
+
+                    if (!IsAllowedEntity(toolUse, allowedEntityId))
+                    {
+                        return WrongEntityError(toolUse.Name, diarienummer, allowedEntityId, TryGetToolNameArgument(toolUse));
+                    }
+
                     // Beslutet är fattat och medger verkställighet; åtgärden är på väg att utföras.
+                    Activity.Current?.AddEvent(new ActivityEvent("first HA action",
+                        tags: new ActivityTagsCollection { { "tool.name", toolUse.Name } }));
                     progress?.Report(Handlaggningshandelse.ForSteg("Verkställer"));
                 }
 
@@ -70,6 +99,40 @@ public sealed class HaToolFactory(TimeProvider clock, ILogger<HaToolFactory> log
     {
         return $"Verktyget {toolName} anropades men beslutet ({beslut.GetType().Name}) " +
                "medger ingen verkställighet; ingen åtgärd utförs.";
+    }
+
+    private string WrongEntityError(
+        string toolName,
+        string diarienummer,
+        string? allowedEntityId,
+        string? requestedName)
+    {
+        _logger.LogWarning(
+            "Agent for {Diarienummer} called {ToolName} for wrong entity {RequestedEntity}; allowed entity is {AllowedEntity}",
+            diarienummer, toolName, requestedName, allowedEntityId);
+
+        return $"Verktyget {toolName} avvisades: ärendet gäller endast entity-id " +
+               $"{allowedEntityId}. Anropa verkställande HA-funktion med exakt detta värde som `name`.";
+    }
+
+    private static bool IsAllowedEntity(BetaToolUseBlock toolUse, string? allowedEntityId)
+    {
+        if (string.IsNullOrWhiteSpace(allowedEntityId))
+        {
+            return true;
+        }
+
+        return string.Equals(TryGetToolNameArgument(toolUse), allowedEntityId, StringComparison.Ordinal);
+    }
+
+    private static string? TryGetToolNameArgument(BetaToolUseBlock toolUse)
+    {
+        if (toolUse.Input.TryGetValue("name", out var name) && name.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            return name.GetString();
+        }
+
+        return null;
     }
 
     private async Task<BetaToolResultBlockParamContent> ExecuteHaToolAsync(
@@ -120,45 +183,4 @@ public sealed class HaToolFactory(TimeProvider clock, ILogger<HaToolFactory> log
                    $"({ex.GetType().Name}: {ex.Message}). Bordlägg ärendet i karaktär.";
         }
     }
-
-    private BetaRunnableTool BuildBeslutTool(
-        BeslutSlot slot, string diarienummer, IProgress<Handlaggningshandelse>? progress) =>
-        new()
-        {
-            Name = BeslutToolName,
-            Definition = new BetaToolUnion(new BetaTool
-            {
-                Name = BeslutToolName,
-                Description = "Utfärda ett formellt beslut på ansökan. MÅSTE anropas före varje verkställande HA-anrop.",
-                InputSchema = BeslutsSchema.Build(),
-                EagerInputStreaming = true,
-                // No cache_control: cached via the system-prompt prefix; no separate breakpoint needed.
-            }),
-            Run = (toolUse, _) =>
-            {
-                var beslut = BeslutParser.TryParse(toolUse.Input, _clock.GetUtcNow(), diarienummer, _logger);
-                if (beslut is null)
-                {
-                    return Task.FromResult<BetaToolResultBlockParamContent>(
-                        "Beslutet kunde inte registreras: ogiltig struktur. " +
-                        "Anropa lamna_beslut igen med samtliga obligatoriska fält.");
-                }
-
-                if (!slot.TrySet(beslut))
-                {
-                    return Task.FromResult<BetaToolResultBlockParamContent>(
-                        "Ett beslut har redan utfärdats för detta ärende. " +
-                        "Ytterligare beslut kan inte registreras.");
-                }
-
-                // Beslutet är fattat mitt i loopen (~8 s före loopens slut). Rapportera det direkt så
-                // sidan visar beslutet medan eventuell verkställighet fortfarande pågår.
-                progress?.Report(Handlaggningshandelse.ForBeslut(beslut));
-
-                return Task.FromResult<BetaToolResultBlockParamContent>(
-                    $"Beslutet är registrerat i diariet. Beslutstyp: {beslut.GetType().Name}. " +
-                    $"Beslutstext: {beslut.Beslutstext} " +
-                    $"Verkställighet enligt beslutet: {beslut.Verkstallighet}");
-            },
-        };
 }
